@@ -11,10 +11,16 @@ from __future__ import annotations
 
 import os
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+
+# Precisa rodar antes do `from routes import ...` abaixo: routes.analyze já
+# importa o GeminiAgentService, que lê GEMINI_MODEL do ambiente na
+# construção do módulo.
+load_dotenv()
 
 from routes import analyze, datasets, health
 
