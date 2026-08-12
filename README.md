@@ -5,8 +5,10 @@ em linguagem natural — sem escrever SQL. A interface implementa o design criad
 ("CSV Insight"), preservando tokens, espaçamentos, componentes, estados e comportamento
 responsivo.
 
-No momento tudo funciona com **dados mockados**. A arquitetura já está preparada para plugar um
-backend FastAPI sem alterar componentes.
+Por padrão (`VITE_USE_MOCKS=true`) tudo funciona com **dados mockados**, calculados no navegador.
+Um backend FastAPI (pasta [`backend/`](backend/)) já implementa o mesmo contrato consumido por
+`src/services/apiDataService.ts` — para usá-lo, veja [`backend/README.md`](backend/README.md) e
+ajuste `VITE_USE_MOCKS=false` no `.env` do front-end.
 
 ---
 
@@ -289,16 +291,24 @@ Inter, com fallback `system-ui, sans-serif`, pesos 400/500/600/700. A escala viv
 
 ---
 
-## Integração futura com FastAPI
+## Integração com o backend FastAPI
 
-1. Ajuste o `.env`:
+1. Suba o backend (veja [`backend/README.md`](backend/README.md) para detalhes):
+
+   ```bash
+   cd backend
+   pip install -r requirements.txt
+   uvicorn main:app --reload
+   ```
+
+2. Ajuste o `.env` do front-end:
 
    ```
    VITE_USE_MOCKS=false
    VITE_API_URL=http://localhost:8000/api
    ```
 
-2. Implemente no backend os endpoints consumidos por
+3. Endpoints implementados em `backend/routes/`, consumidos por
    [`src/services/apiDataService.ts`](src/services/apiDataService.ts):
 
    | Método | Endpoint | Corpo | Resposta |
@@ -309,7 +319,8 @@ Inter, com fallback `system-ui, sans-serif`, pesos 400/500/600/700. A escala viv
    | `GET` | `/datasets/{datasetId}/history` | — | `{ "data": ChatMessage[] }` |
    | `DELETE` | `/datasets/{datasetId}/history/{messageId}` | — | `204` |
 
-3. Os contratos de `Dataset`, `QueryResult` e `ChatMessage` estão em [`src/types`](src/types).
+4. Os contratos de `Dataset`, `QueryResult` e `ChatMessage` estão em [`src/types`](src/types) e
+   têm um schema Pydantic equivalente em [`backend/schemas/models.py`](backend/schemas/models.py).
    Erros devolvidos com `detail` ou `message` são convertidos em `ApiError` e exibidos como
    resultado do tipo `error` na conversa.
 
