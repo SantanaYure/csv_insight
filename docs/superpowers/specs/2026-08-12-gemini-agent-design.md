@@ -55,19 +55,32 @@ pode se corrigir, ex.: pedir `listar_colunas` de novo com nome certo).
 
 ## Ciclo de function calling
 
-Loop manual, máximo de 5 iterações:
+O SDK `google-genai` atual expõe a **Interactions API**
+(`client.interactions.create(...)`), não o `generate_content()`/`types.Tool`
+mais antigo. Loop manual, máximo de 5 iterações:
 
-1. Monta `contents` com a pergunta + `system_instruction`.
-2. Chama `client.models.generate_content(...)` com as 5 tools declaradas
-   (schemas JSON explícitos, não introspecção automática).
-3. Se a resposta tem `function_call`: executa a função correspondente
-   (try/except captura erro de execução e erro de "ferramenta inexistente"),
-   devolve o resultado (ou o erro) via `function_response`, volta ao passo 2.
-4. Se a resposta tem `text`: essa é a resposta final →
-   `TextQueryResult(answer=texto, detail=None)`.
-5. Estourar o limite de iterações, ou vir `function_call` para nome
-   desconhecido repetidamente, ou resposta vazia/bloqueada → erro tratado
-   (item abaixo).
+1. Chama `client.interactions.create(model=..., input=pergunta_ou_resultados,
+   tools=TOOL_DECLARATIONS, system_instruction=..., previous_interaction_id=...)`.
+   As 5 tools são declaradas como dicts JSON simples
+   (`{"type": "function", "name", "description", "parameters"}`), sem
+   introspecção automática de funções Python.
+2. Percorre `interaction.steps`: cada step com `.type == "function_call"` tem
+   `.name` e `.arguments` (já um dict) e `.id` (usado como `call_id` na
+   resposta). Executa a função correspondente (try/except captura erro de
+   execução e nome de ferramenta desconhecida) e monta um item
+   `{"type": "function_result", "name": step.name, "call_id": step.id,
+   "result": [{"type": "text", "text": json.dumps(saida)}]}`.
+3. Se houve pelo menos um `function_call`: a próxima chamada usa
+   `input=<lista de function_result>` e `previous_interaction_id=interaction.id`,
+   volta ao passo 1.
+4. Se não houve nenhum `function_call`: `interaction.output_text` é a
+   resposta final → `TextQueryResult(answer=texto, detail=None)`.
+5. Estourar o limite de iterações, ou `output_text` vazio/ausente → erro
+   tratado (item abaixo).
+
+Erros da API são exceções `google.genai.errors.APIError` (e subclasses
+`ClientError`/`ServerError`), com atributo `.code` (int, código HTTP) — usado
+para distinguir rate limit (429) de outras falhas de comunicação.
 
 ## Grounding — só responder com base nos dados carregados
 
@@ -113,7 +126,7 @@ Casos cobertos:
 | Variável | Obrigatória | Default | Descrição |
 | --- | --- | --- | --- |
 | `GEMINI_API_KEY` | sim | — | chave da API Gemini, lida via `os.getenv`, nunca hardcoded |
-| `GEMINI_MODEL` | não | `gemini-2.5-flash` | modelo usado, compatível com free tier |
+| `GEMINI_MODEL` | não | `gemini-3.6-flash` | modelo usado (Flash, compatível com free tier); confirme o nome exato disponível na sua conta em [aistudio.google.com](https://aistudio.google.com) |
 
 `backend/.env.example` novo, documentando as duas variáveis.
 
