@@ -98,6 +98,11 @@ Rotas e outros serviços só conhecem a interface `AgentService` — trocar a
 implementação (outro provedor de LLM, por exemplo) é apontar a variável
 `agent_service` para uma nova classe, sem tocar nas rotas.
 
+**Privacidade:** uma vez que `GEMINI_API_KEY` é configurada, as linhas devolvidas por
+`buscar_registros` e `filtrar_dados` (até 50 por chamada) são enviadas para a API do Gemini como
+parte da requisição que responde à pergunta — ou seja, dados do CSV saem da máquina local e vão
+para o Google.
+
 ## Testes
 
 ```bash

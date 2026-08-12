@@ -681,10 +681,28 @@ def buscar_registros(
     }
 
 
+def _normalize_date(value: CellValue) -> CellValue:
+    """Normaliza uma data (ISO `yyyy-mm-dd` ou BR `dd/mm/yyyy`, com ou sem
+    horário) para a forma `yyyy-mm-dd`, de modo que a comparação
+    lexicográfica de strings coincida com a ordem cronológica. Valores que
+    não batem com nenhum dos dois formatos (ou não são string) voltam
+    inalterados, em vez de lançar uma exceção."""
+    if not isinstance(value, str):
+        return value
+    if BR_DATE.match(value):
+        day, month, year = value[:10].split("/")
+        return f"{year}-{month}-{day}"
+    if ISO_DATE.match(value):
+        return value[:10]
+    return value
+
+
 def _coerce_filter_value(raw: str, data_type: DatasetColumnType) -> CellValue:
     if data_type in ("number", "currency"):
         parsed = parse_number(raw)
         return raw if parsed is None else parsed
+    if data_type == "date":
+        return _normalize_date(raw)
     return raw
 
 
@@ -727,7 +745,12 @@ def filtrar_dados(
 
     target = _coerce_filter_value(value, found_column.dataType)
     rows = store.rows_by_table(dataset_id).get(found_table.id, [])
-    matches = [row for row in rows if _matches(row.get(column), operator, target)]
+    if found_column.dataType == "date":
+        matches = [
+            row for row in rows if _matches(_normalize_date(row.get(column)), operator, target)
+        ]
+    else:
+        matches = [row for row in rows if _matches(row.get(column), operator, target)]
 
     return {
         "table": found_table.name,
@@ -761,6 +784,7 @@ def calcular_estatisticas(dataset_id: str, table: str, column: str) -> dict[str,
             "column": column,
             "count": len(numeric),
             "nullCount": null_count,
+            "nonNumericCount": len(values) - len(numeric),
             "sum": total,
             "avg": total / len(numeric) if numeric else None,
             "min": min(numeric) if numeric else None,
