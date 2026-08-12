@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from google.genai import errors as genai_errors
+from google.genai._gaos.lib import compat_errors
 
 from schemas.models import DatasetContext, ErrorQueryResult, TextQueryResult
 from services.agent_service import GeminiAgentService
@@ -142,6 +144,25 @@ def test_tool_execution_error_is_reported_back_to_model(stored_dataset_id):
 
 def test_rate_limit_error_returns_friendly_message(stored_dataset_id):
     client = FakeClient([genai_errors.ClientError(429, {"error": {"message": "quota exceeded"}})])
+    service = GeminiAgentService(client=client)
+    response = service.analyze("Qual o total?", dataset_context=make_context(stored_dataset_id))
+    assert response.status == "error"
+    assert "limite" in response.result.title.lower()
+
+
+def test_real_interactions_api_rate_limit_error_returns_friendly_message(stored_dataset_id):
+    """Exercises the *real* exception shape raised by the installed google-genai
+    2.x Interactions API (google.genai._gaos.lib.compat_errors.RateLimitError),
+    not just the older google.genai.errors.ClientError shape covered above."""
+    response_obj = httpx.Response(
+        status_code=429, request=httpx.Request("POST", "https://example.com")
+    )
+    rate_limit_error = compat_errors.RateLimitError(
+        "Error code: 429 - quota exceeded",
+        response=response_obj,
+        body={"error": {"message": "quota exceeded"}},
+    )
+    client = FakeClient([rate_limit_error])
     service = GeminiAgentService(client=client)
     response = service.analyze("Qual o total?", dataset_context=make_context(stored_dataset_id))
     assert response.status == "error"

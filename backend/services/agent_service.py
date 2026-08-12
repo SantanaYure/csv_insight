@@ -16,7 +16,6 @@ from abc import ABC, abstractmethod
 from typing import Any, Callable
 
 from google import genai
-from google.genai import errors as genai_errors
 
 from schemas.models import (
     AgentAnalyzeResponse,
@@ -272,11 +271,12 @@ class GeminiAgentService(AgentService):
                     system_instruction=SYSTEM_INSTRUCTION,
                     previous_interaction_id=previous_id,
                 )
-            except genai_errors.APIError as exc:
-                if exc.code == 429:
-                    raise _RateLimitError() from exc
-                raise _ModelCommunicationError() from exc
             except Exception as exc:
+                status_code = getattr(exc, "status_code", None)
+                if status_code is None:
+                    status_code = getattr(exc, "code", None)
+                if status_code == 429:
+                    raise _RateLimitError() from exc
                 raise _ModelCommunicationError() from exc
 
             function_results = []
