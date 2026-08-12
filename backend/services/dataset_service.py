@@ -23,9 +23,10 @@ import re
 import time
 import unicodedata
 import zipfile
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import BinaryIO
+from typing import Any, BinaryIO
 
 from schemas.models import ChatMessage, Dataset, DatasetColumn, DatasetColumnType, DatasetTable
 
@@ -51,6 +52,11 @@ NUMBER_SHAPE = re.compile(r"^-?\d*\.?\d+$")
 
 class DatasetIngestionError(Exception):
     """Erro de ingestão com mensagem pronta para exibição ao usuário."""
+
+
+class DatasetToolError(Exception):
+    """Erro de execução de uma tool do agente, com mensagem pronta para ser
+    devolvida ao modelo (e, em último caso, ao usuário)."""
 
 
 # --- ids -----------------------------------------------------------------
@@ -571,3 +577,203 @@ class _DatasetStore:
 
 
 store = _DatasetStore()
+
+
+# --- tools do agente (consultas sobre um dataset já carregado) -------------
+
+MAX_TOOL_ROWS = 50
+_FILTER_OPERATORS = ("=", "!=", ">", "<", ">=", "<=", "contains")
+
+
+def _get_dataset_or_raise(dataset_id: str) -> Dataset:
+    dataset = store.get_dataset(dataset_id)
+    if dataset is None:
+        raise DatasetToolError("Dataset não encontrado.")
+    return dataset
+
+
+def _find_table(dataset: Dataset, table_ref: str) -> DatasetTable:
+    for table in dataset.tables:
+        if table.id == table_ref or table.name == table_ref:
+            return table
+    available = ", ".join(table.name for table in dataset.tables)
+    raise DatasetToolError(
+        f"Tabela '{table_ref}' não existe neste dataset. Tabelas disponíveis: {available}."
+    )
+
+
+def _find_column(table: DatasetTable, column_ref: str) -> DatasetColumn:
+    for column in table.columns:
+        if column.name == column_ref:
+            return column
+    available = ", ".join(column.name for column in table.columns)
+    raise DatasetToolError(
+        f"Coluna '{column_ref}' não existe na tabela '{table.name}'. Colunas disponíveis: {available}."
+    )
+
+
+def _column_info(column: DatasetColumn) -> dict[str, Any]:
+    return {
+        "name": column.name,
+        "dataType": column.dataType,
+        "description": column.description,
+        "nullable": column.nullable,
+        "nullCount": column.nullCount,
+    }
+
+
+def listar_colunas(dataset_id: str, table: str | None = None) -> dict[str, Any]:
+    """Lista as colunas de uma tabela do dataset, ou de todas as tabelas se
+    `table` for None."""
+    dataset = _get_dataset_or_raise(dataset_id)
+
+    if table is not None:
+        found = _find_table(dataset, table)
+        return {"table": found.name, "columns": [_column_info(column) for column in found.columns]}
+
+    return {
+        "tables": [
+            {"table": t.name, "columns": [_column_info(column) for column in t.columns]}
+            for t in dataset.tables
+        ]
+    }
+
+
+def obter_resumo(dataset_id: str) -> dict[str, Any]:
+    """Resumo do dataset: nome, tabelas, totais de linhas/colunas e descrição
+    textual gerada na ingestão."""
+    dataset = _get_dataset_or_raise(dataset_id)
+    return {
+        "datasetName": dataset.name,
+        "summary": dataset.summary,
+        "totalRows": dataset.totalRows,
+        "totalColumns": dataset.totalColumns,
+        "tables": [
+            {
+                "table": t.name,
+                "rowCount": t.rowCount,
+                "columnCount": t.columnCount,
+                "description": t.description,
+            }
+            for t in dataset.tables
+        ],
+    }
+
+
+def buscar_registros(
+    dataset_id: str, table: str, limit: int = 10, offset: int = 0
+) -> dict[str, Any]:
+    """Amostra de linhas de uma tabela (limit entre 1 e 50, offset >= 0)."""
+    dataset = _get_dataset_or_raise(dataset_id)
+    found = _find_table(dataset, table)
+
+    safe_limit = max(1, min(limit, MAX_TOOL_ROWS))
+    safe_offset = max(0, offset)
+
+    rows = store.rows_by_table(dataset_id).get(found.id, [])
+    page = rows[safe_offset : safe_offset + safe_limit]
+
+    return {
+        "table": found.name,
+        "totalRows": len(rows),
+        "returned": len(page),
+        "rows": page,
+    }
+
+
+def _coerce_filter_value(raw: str, data_type: DatasetColumnType) -> CellValue:
+    if data_type in ("number", "currency"):
+        parsed = parse_number(raw)
+        return raw if parsed is None else parsed
+    return raw
+
+
+def _matches(cell: CellValue, operator: str, target: CellValue) -> bool:
+    if operator == "contains":
+        return isinstance(cell, str) and isinstance(target, str) and target.lower() in cell.lower()
+    if cell is None:
+        return False
+    try:
+        if operator == "=":
+            return cell == target
+        if operator == "!=":
+            return cell != target
+        if operator == ">":
+            return cell > target
+        if operator == "<":
+            return cell < target
+        if operator == ">=":
+            return cell >= target
+        if operator == "<=":
+            return cell <= target
+    except TypeError:
+        return False
+    return False
+
+
+def filtrar_dados(
+    dataset_id: str, table: str, column: str, operator: str, value: str
+) -> dict[str, Any]:
+    """Linhas de uma tabela cuja `column` satisfaz `operator` em relação a
+    `value`. Devolve no máximo 50 linhas, mas informa o total de acertos."""
+    if operator not in _FILTER_OPERATORS:
+        raise DatasetToolError(
+            f"Operador '{operator}' inválido. Use um de: {', '.join(_FILTER_OPERATORS)}."
+        )
+
+    dataset = _get_dataset_or_raise(dataset_id)
+    found_table = _find_table(dataset, table)
+    found_column = _find_column(found_table, column)
+
+    target = _coerce_filter_value(value, found_column.dataType)
+    rows = store.rows_by_table(dataset_id).get(found_table.id, [])
+    matches = [row for row in rows if _matches(row.get(column), operator, target)]
+
+    return {
+        "table": found_table.name,
+        "column": column,
+        "operator": operator,
+        "value": value,
+        "totalMatches": len(matches),
+        "returned": len(matches[:MAX_TOOL_ROWS]),
+        "rows": matches[:MAX_TOOL_ROWS],
+    }
+
+
+def calcular_estatisticas(dataset_id: str, table: str, column: str) -> dict[str, Any]:
+    """Estatísticas de uma coluna: numérica/moeda devolve
+    count/sum/avg/min/max/nullCount; texto devolve distinctCount e os 5
+    valores mais frequentes (topValues)."""
+    dataset = _get_dataset_or_raise(dataset_id)
+    found_table = _find_table(dataset, table)
+    found_column = _find_column(found_table, column)
+
+    rows = store.rows_by_table(dataset_id).get(found_table.id, [])
+    raw_values = [row.get(column) for row in rows]
+    values = [value for value in raw_values if value is not None]
+    null_count = len(raw_values) - len(values)
+
+    if found_column.dataType in ("number", "currency"):
+        numeric = [value for value in values if isinstance(value, (int, float))]
+        total = sum(numeric)
+        return {
+            "table": found_table.name,
+            "column": column,
+            "count": len(numeric),
+            "nullCount": null_count,
+            "sum": total,
+            "avg": total / len(numeric) if numeric else None,
+            "min": min(numeric) if numeric else None,
+            "max": max(numeric) if numeric else None,
+        }
+
+    counts = Counter(str(value) for value in values)
+    top_values = [{"value": value, "count": count} for value, count in counts.most_common(5)]
+    return {
+        "table": found_table.name,
+        "column": column,
+        "count": len(values),
+        "nullCount": null_count,
+        "distinctCount": len(counts),
+        "topValues": top_values,
+    }
