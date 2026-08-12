@@ -138,12 +138,23 @@ Casos cobertos:
 - `backend/services/dataset_service.py` — adição das 5 funções de tool e da
   exceção `DatasetToolError`. Nenhuma mudança nas funções de ingestão
   existentes.
-- `backend/requirements.txt` — adiciona `google-genai`.
+- `backend/requirements.txt` — adiciona `google-genai` e `pytest` (testes) e
+  `python-dotenv` (ver nota abaixo).
 - `backend/.env.example` — novo.
+- `backend/pytest.ini` — novo (`pythonpath = .`, para os testes importarem
+  `services`/`schemas` do jeito que `uvicorn` já importa).
+- `backend/tests/` — novo (`conftest.py` com fixture de dataset de teste,
+  `test_dataset_tools.py`, `test_agent_service.py`).
+- `backend/main.py` — duas linhas no topo (`from dotenv import load_dotenv;
+  load_dotenv()`) para que `backend/.env` seja lido automaticamente, do
+  mesmo jeito que o front-end já lê o `.env` dele. Sem isso, `GEMINI_API_KEY`
+  só seria lida se exportada manualmente no shell a cada sessão — pequeno
+  desvio do "nenhuma mudança em main.py" original, necessário para o
+  `.env.example` funcionar de fato.
 - `backend/README.md` — seção "Agente de IA (mock)" atualizada para refletir
   a implementação real.
 
-Nenhuma mudança em `routes/`, `schemas/models.py` ou `main.py`.
+Nenhuma mudança em `routes/` ou `schemas/models.py`.
 
 ## Testes / verificação
 
