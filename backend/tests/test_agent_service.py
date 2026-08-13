@@ -5,7 +5,6 @@ from types import SimpleNamespace
 
 import groq
 import httpx
-import pytest
 
 from schemas.models import DatasetContext, ErrorQueryResult, TextQueryResult
 from services.agent_service import GroqAgentService
@@ -190,6 +189,15 @@ def test_timeout_error_returns_friendly_message(stored_dataset_id):
     response = service.analyze("Qual o total?", dataset_context=make_context(stored_dataset_id))
     assert response.status == "error"
     assert "tempo" in response.result.title.lower()
+
+
+def test_invalid_api_key_returns_friendly_message(stored_dataset_id):
+    client = FakeClient([_http_status_error(groq.AuthenticationError, 401, "invalid api key")])
+    service = GroqAgentService(client=client)
+    response = service.analyze("Qual o total?", dataset_context=make_context(stored_dataset_id))
+    assert response.status == "error"
+    title_and_message = (response.result.title + " " + response.result.message).lower()
+    assert "inválida" in title_and_message or "chave" in title_and_message
 
 
 def test_model_unavailable_error_returns_friendly_message(stored_dataset_id):

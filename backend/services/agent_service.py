@@ -187,16 +187,24 @@ class _InvalidModelResponseError(Exception):
     """O modelo não produziu uma resposta de texto utilizável."""
 
 
+class _InvalidApiKeyError(Exception):
+    """GROQ_API_KEY configurada, mas rejeitada pela API (inválida, revogada ou expirada)."""
+
+
 _GPT_OSS_TOOL_CALL_CORRUPTION_MARKERS = ("tool_use_failed", "<|channel|>")
 
 
 def _is_gpt_oss_tool_call_corruption(exc: Exception) -> bool:
-    """openai/gpt-oss-20b tem uma falha de serving conhecida e intermitente: às vezes
-    vaza o token interno `<|channel|>commentary` do formato Harmony dentro do nome da
-    tool chamada (ex.: `listar_colunas<|channel|>commentary`), o que a Groq rejeita
-    como tool inexistente antes mesmo de nos devolver uma resposta. Não é algo que o
-    nosso código causa ou pode evitar na requisição — é uma tentativa de mitigação
-    tentando de novo, já que é um artefato estocástico da geração, não determinístico."""
+    """Detecta uma falha de validação de tool call vinda da Groq (`tool_use_failed`
+    ou vazamento do token interno `<|channel|>` do formato Harmony no nome da tool).
+    O gpt-oss-20b tem uma falha de serving conhecida e intermitente em que vaza esse
+    token dentro do nome da tool chamada (ex.: `listar_colunas<|channel|>commentary`),
+    o que a Groq rejeita como tool inexistente antes mesmo de nos devolver uma
+    resposta — esse é o caso dominante na prática, mas a checagem também pega
+    qualquer outra falha de validação de tool call que reporte o mesmo código de
+    erro. Não é algo que o nosso código causa ou pode evitar na requisição — é uma
+    tentativa de mitigação tentando de novo, já que é um artefato estocástico da
+    geração, não determinístico."""
     text = str(exc)
     return any(marker in text for marker in _GPT_OSS_TOOL_CALL_CORRUPTION_MARKERS)
 
@@ -269,6 +277,12 @@ class GroqAgentService(AgentService):
             return self._error(
                 "Resposta inválida",
                 "O modelo não conseguiu produzir uma resposta válida para esta pergunta.",
+            )
+        except _InvalidApiKeyError:
+            logger.exception("GROQ_API_KEY rejeitada pela API Groq.")
+            return self._error(
+                "Chave inválida",
+                "A chave da API Groq (GROQ_API_KEY) foi rejeitada. Verifique o valor em backend/.env.",
             )
 
         return AgentAnalyzeResponse(
@@ -347,12 +361,18 @@ class GroqAgentService(AgentService):
                 raise _ModelUnavailableError() from exc
             except groq.APIConnectionError as exc:
                 raise _ModelCommunicationError() from exc
+            except groq.AuthenticationError as exc:
+                raise _InvalidApiKeyError() from exc
             except groq.APIStatusError as exc:
                 raise _ModelCommunicationError() from exc
             except Exception as exc:
                 raise _ModelCommunicationError() from exc
 
-            message = response.choices[0].message
+            choices = getattr(response, "choices", None)
+            if not choices:
+                raise _InvalidModelResponseError()
+
+            message = choices[0].message
             tool_calls = message.tool_calls
 
             if not tool_calls:

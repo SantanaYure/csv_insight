@@ -101,7 +101,7 @@ executada.
 
 ## Tratamento de erros
 
-8 categorias (uma a mais que o agente Gemini — timeout é separado de falha de comunicação, por
+9 categorias (uma a mais que o agente Gemini — timeout é separado de falha de comunicação, por
 pedido explícito):
 
 | Caso | Tratamento |
