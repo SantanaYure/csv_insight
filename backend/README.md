@@ -80,6 +80,12 @@ modelo responder com texto (limite de 5 idas e voltas). O agente só responde co
 que as tools devolverem — nunca usa conhecimento geral do modelo — e diz explicitamente
 quando a pergunta não tem relação com os dados carregados.
 
+`openai/gpt-oss-20b` tem uma falha de serving conhecida e intermitente em que vaza o token
+interno `<|channel|>commentary` do formato Harmony dentro do nome de uma tool chamada,
+o que a Groq rejeita com HTTP 400 antes de qualquer `tool_calls` chegar até nós;
+`_run_conversation` detecta esse padrão específico e tenta a mesma requisição mais uma vez
+antes de reportar falha de comunicação.
+
 Configuração (`backend/.env`, veja `.env.example`):
 
 | Variável | Obrigatória | Padrão | Descrição |

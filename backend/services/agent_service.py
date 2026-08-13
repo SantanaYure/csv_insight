@@ -187,6 +187,20 @@ class _InvalidModelResponseError(Exception):
     """O modelo não produziu uma resposta de texto utilizável."""
 
 
+_GPT_OSS_TOOL_CALL_CORRUPTION_MARKERS = ("tool_use_failed", "<|channel|>")
+
+
+def _is_gpt_oss_tool_call_corruption(exc: Exception) -> bool:
+    """openai/gpt-oss-20b tem uma falha de serving conhecida e intermitente: às vezes
+    vaza o token interno `<|channel|>commentary` do formato Harmony dentro do nome da
+    tool chamada (ex.: `listar_colunas<|channel|>commentary`), o que a Groq rejeita
+    como tool inexistente antes mesmo de nos devolver uma resposta. Não é algo que o
+    nosso código causa ou pode evitar na requisição — é uma tentativa de mitigação
+    tentando de novo, já que é um artefato estocástico da geração, não determinístico."""
+    text = str(exc)
+    return any(marker in text for marker in _GPT_OSS_TOOL_CALL_CORRUPTION_MARKERS)
+
+
 class GroqAgentService(AgentService):
     """Agente real: usa a API Groq (chat completions, compatível com o padrão
     OpenAI) com function calling sobre as tools de `dataset_service` para
@@ -285,6 +299,17 @@ class GroqAgentService(AgentService):
             ),
         }
 
+    def _create_completion(self, client: groq.Groq, messages: list[Any]) -> Any:
+        """Chamada crua à API Groq, sem mapear exceções — quem chama decide o
+        que fazer com elas (inclui a retentativa em `_run_conversation` para o
+        artefato de corrupção do gpt-oss-20b antes do mapeamento final)."""
+        return client.chat.completions.create(
+            model=self._model,
+            messages=messages,
+            tools=TOOL_DECLARATIONS,
+            tool_choice="auto",
+        )
+
     def _run_conversation(
         self,
         client: groq.Groq,
@@ -298,12 +323,22 @@ class GroqAgentService(AgentService):
 
         for _ in range(MAX_TOOL_ITERATIONS):
             try:
-                response = client.chat.completions.create(
-                    model=self._model,
-                    messages=messages,
-                    tools=TOOL_DECLARATIONS,
-                    tool_choice="auto",
-                )
+                try:
+                    response = self._create_completion(client, messages)
+                except groq.BadRequestError as exc:
+                    if not _is_gpt_oss_tool_call_corruption(exc):
+                        raise
+                    # Artefato de geração intermitente e conhecido do gpt-oss-20b
+                    # (ver _is_gpt_oss_tool_call_corruption). Tenta a mesma
+                    # requisição mais uma única vez antes de desistir; não conta
+                    # como uma nova iteração do loop de tools (messages não muda).
+                    # Qualquer exceção da segunda tentativa (sucesso ou não) segue
+                    # para o mapeamento abaixo sem uma nova retentativa.
+                    logger.warning(
+                        "Tool call corrompida pelo gpt-oss-20b (<|channel|> vazado "
+                        "no nome da tool); tentando novamente uma vez."
+                    )
+                    response = self._create_completion(client, messages)
             except groq.RateLimitError as exc:
                 raise _RateLimitError() from exc
             except groq.APITimeoutError as exc:

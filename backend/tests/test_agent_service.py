@@ -217,6 +217,71 @@ def test_blank_final_response_returns_invalid_response_error(stored_dataset_id):
     assert "inválida" in response.result.title.lower()
 
 
+def test_gpt_oss_tool_call_corruption_is_retried_once_and_succeeds(stored_dataset_id):
+    corrupted_error = _http_status_error(
+        groq.BadRequestError,
+        400,
+        "Tool call validation failed: tool call validation failed: attempted to call "
+        "tool 'listar_colunas<|channel|>commentary' which was not in request.tools "
+        "(code: tool_use_failed)",
+    )
+    client = FakeClient(
+        [
+            corrupted_error,
+            make_response(content="Existem 3 fornecedores."),
+        ]
+    )
+    service = GroqAgentService(client=client)
+    response = service.analyze(
+        "Quantos fornecedores existem?", dataset_context=make_context(stored_dataset_id)
+    )
+
+    assert response.status == "success"
+    assert response.result == TextQueryResult(answer="Existem 3 fornecedores.")
+
+    calls = client.chat.completions.calls
+    assert len(calls) == 2
+    assert calls[0]["messages"] == calls[1]["messages"]
+    assert calls[0]["tools"] == calls[1]["tools"]
+
+
+def test_gpt_oss_tool_call_corruption_retry_also_fails_falls_back_to_communication_error(
+    stored_dataset_id,
+):
+    def corrupted_error():
+        return _http_status_error(
+            groq.BadRequestError,
+            400,
+            "Tool call validation failed: tool call validation failed: attempted to "
+            "call tool 'listar_colunas<|channel|>commentary' which was not in "
+            "request.tools (code: tool_use_failed)",
+        )
+
+    client = FakeClient([corrupted_error(), corrupted_error()])
+    service = GroqAgentService(client=client)
+    response = service.analyze(
+        "Quantos fornecedores existem?", dataset_context=make_context(stored_dataset_id)
+    )
+
+    assert response.status == "error"
+    assert "comunica" in response.result.title.lower()
+    assert len(client.chat.completions.calls) == 2
+
+
+def test_unrelated_bad_request_error_is_not_retried(stored_dataset_id):
+    client = FakeClient(
+        [_http_status_error(groq.BadRequestError, 400, "malformed request: missing field")]
+    )
+    service = GroqAgentService(client=client)
+    response = service.analyze(
+        "Quantos fornecedores existem?", dataset_context=make_context(stored_dataset_id)
+    )
+
+    assert response.status == "error"
+    assert "comunica" in response.result.title.lower()
+    assert len(client.chat.completions.calls) == 1
+
+
 def test_exceeding_tool_iterations_returns_generic_error(stored_dataset_id):
     tool_call = make_tool_call("obter_resumo", {}, "call-loop")
     client = FakeClient([make_response(tool_calls=[tool_call]) for _ in range(5)])
