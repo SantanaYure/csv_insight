@@ -15,7 +15,7 @@ backend/
 │   └── analyze.py            POST /api/datasets/{id}/questions, POST /api/analyze
 ├── services/
 │   ├── dataset_service.py    Ingestão do ZIP (porta de src/services/ingestion/*) + store em memória
-│   └── agent_service.py      Interface AgentService + implementação mockada
+│   └── agent_service.py      Interface AgentService + GroqAgentService
 ├── schemas/
 │   └── models.py              Schemas Pydantic espelhando src/types/*.ts
 └── requirements.txt
@@ -58,12 +58,12 @@ em disco — é lido inteiramente em memória com `zipfile`, o que elimina path 
 construção; mesmo assim, nomes de entrada com `..` ou caminho absoluto são descartados, e há
 limites de tamanho (200 MB descomprimido no total, 40 arquivos CSV) para mitigar zip bombs.
 
-## Agente de IA (Gemini)
+## Agente de IA (Groq · GPT-OSS)
 
 `services/agent_service.py` define a interface `AgentService` (método `analyze`) e
-`GeminiAgentService`, que usa a API Gemini (`google-genai`, Interactions API) com
-function calling sobre 5 ferramentas de consulta implementadas em
-`services/dataset_service.py`:
+`GroqAgentService`, que usa a API Groq (SDK oficial `groq`, endpoint de chat completions
+compatível com o padrão OpenAI) com function calling sobre 5 ferramentas de consulta
+implementadas em `services/dataset_service.py`:
 
 | Tool | Parâmetros | Devolve |
 | --- | --- | --- |
@@ -71,37 +71,35 @@ function calling sobre 5 ferramentas de consulta implementadas em
 | `obter_resumo` | — | nome do dataset, tabelas, total de linhas/colunas, resumo |
 | `buscar_registros` | `table, limit=10, offset=0` | amostra de linhas (máx. 50) |
 | `filtrar_dados` | `table, column, operator, value` | linhas que batem o filtro (`=,!=,>,<,>=,<=,contains`) |
-| `calcular_estatisticas` | `table, column` | numérico: count/sum/avg/min/max/nullCount · texto: distinct/top-values |
+| `calcular_estatisticas` | `table, column` | numérico: count/sum/avg/min/max/nullCount/nonNumericCount · texto: distinct/top-values |
 
-Fluxo: a pergunta vai para `client.interactions.create(...)`; se o modelo pedir uma
-tool (`step.type == "function_call"`), o `GeminiAgentService` executa a função
-correspondente em `dataset_service.py` e devolve o resultado via
-`function_result`, repetindo até o modelo responder com texto (limite de 5
-idas e voltas). O agente só responde com base no que as tools devolverem —
-nunca usa conhecimento geral do modelo — e diz explicitamente quando a
-pergunta não tem relação com os dados carregados.
+Fluxo: a pergunta vai para `client.chat.completions.create(...)`; se o modelo pedir uma tool
+(`message.tool_calls`), o `GroqAgentService` executa a função correspondente em
+`dataset_service.py` e devolve o resultado como mensagem `role: "tool"`, repetindo até o
+modelo responder com texto (limite de 5 idas e voltas). O agente só responde com base no
+que as tools devolverem — nunca usa conhecimento geral do modelo — e diz explicitamente
+quando a pergunta não tem relação com os dados carregados.
 
 Configuração (`backend/.env`, veja `.env.example`):
 
 | Variável | Obrigatória | Padrão | Descrição |
 | --- | --- | --- | --- |
-| `GEMINI_API_KEY` | sim | — | chave da API Gemini |
-| `GEMINI_MODEL` | não | `gemini-3.6-flash` | modelo Flash usado pelo agente |
+| `GROQ_API_KEY` | sim | — | chave da API Groq |
+| `GROQ_MODEL` | não | `openai/gpt-oss-20b` | modelo usado pelo agente |
 
-Erros (chave ausente, dataset não carregado, limite de uso, falha de
-comunicação, ferramenta inexistente, erro de execução de ferramenta,
-resposta inválida do modelo) nunca geram uma exceção HTTP nova: viram um
-`QueryResult` do tipo `error`, no mesmo formato que qualquer outra resposta
-de pergunta — sem stack trace nem detalhe interno exposto ao front-end.
+**Privacidade:** uma vez configurada `GROQ_API_KEY`, as linhas devolvidas por
+`buscar_registros`/`filtrar_dados` (até 50 por chamada) são enviadas à API da Groq como
+parte da resposta à pergunta — os dados saem da máquina local.
 
-Rotas e outros serviços só conhecem a interface `AgentService` — trocar a
-implementação (outro provedor de LLM, por exemplo) é apontar a variável
-`agent_service` para uma nova classe, sem tocar nas rotas.
+Erros (chave ausente, dataset não carregado, timeout, limite de uso, falha de comunicação,
+modelo indisponível, ferramenta inexistente, erro de execução de ferramenta, resposta
+inválida do modelo) nunca geram uma exceção HTTP nova: viram um `QueryResult` do tipo
+`error`, no mesmo formato que qualquer outra resposta de pergunta — sem stack trace nem
+detalhe interno exposto ao front-end.
 
-**Privacidade:** uma vez que `GEMINI_API_KEY` é configurada, as linhas devolvidas por
-`buscar_registros` e `filtrar_dados` (até 50 por chamada) são enviadas para a API do Gemini como
-parte da requisição que responde à pergunta — ou seja, dados do CSV saem da máquina local e vão
-para o Google.
+Rotas e outros serviços só conhecem a interface `AgentService` — trocar a implementação
+(outro provedor de LLM, por exemplo) é apontar a variável `agent_service` para uma nova
+classe, sem tocar nas rotas.
 
 ## Testes
 

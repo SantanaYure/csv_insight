@@ -1,5 +1,5 @@
 """Teste de fumaça HTTP: garante que o app sobe e responde mesmo sem
-`GEMINI_API_KEY` configurada, exercitando a rota real (não `agent_service`
+`GROQ_API_KEY` configurada, exercitando a rota real (não `agent_service`
 diretamente). Isso prova a alegação de que "o contrato HTTP não muda" e que
 uma falha de configuração vira um `QueryResult` do tipo `error`, não uma
 exceção que derrubaria o app inteiro na inicialização."""
@@ -14,13 +14,13 @@ def test_app_answers_question_with_safe_error_when_api_key_is_missing(
 ):
     # Importar `main` aqui (e não crashar) demonstra que o app é
     # import-safe. Isso precisa vir *antes* do `delenv`: `main.py` chama
-    # `load_dotenv()` no import, que preenche `GEMINI_API_KEY` a partir de
+    # `load_dotenv()` no import, que preenche `GROQ_API_KEY` a partir de
     # `backend/.env` se a variável ainda não estiver no ambiente — se
     # importássemos depois do `delenv`, o próprio import reintroduziria a
-    # chave e o teste chamaria a API Gemini de verdade.
+    # chave e o teste chamaria a API Groq de verdade.
     import main
 
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
 
     client = TestClient(main.app)
 
