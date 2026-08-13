@@ -1,6 +1,7 @@
-"""Implementação real do AgentService usando a API Gemini (google-genai).
+"""Implementação real do AgentService usando a API Groq (SDK oficial `groq`,
+modelo openai/gpt-oss-20b por padrão).
 
-Nenhuma rota e nenhum outro serviço deve importar `GeminiAgentService`
+Nenhuma rota e nenhum outro serviço deve importar `GroqAgentService`
 diretamente — todos dependem apenas da interface `AgentService`. Trocar de
 implementação (outro provedor de LLM, por exemplo) é só apontar
 `agent_service` (no fim do arquivo) para uma nova classe; nenhum contrato
@@ -15,7 +16,7 @@ import os
 from abc import ABC, abstractmethod
 from typing import Any, Callable
 
-from google import genai
+import groq
 
 from schemas.models import (
     AgentAnalyzeResponse,
@@ -48,7 +49,7 @@ class AgentService(ABC):
         raise NotImplementedError
 
 
-DEFAULT_MODEL = "gemini-3.6-flash"
+DEFAULT_MODEL = "openai/gpt-oss-20b"
 MAX_TOOL_ITERATIONS = 5
 
 SYSTEM_INSTRUCTION = """Você é um analista de dados que responde perguntas sobre um \
@@ -72,112 +73,131 @@ listar_colunas para descobrir).
 TOOL_DECLARATIONS: list[dict[str, Any]] = [
     {
         "type": "function",
-        "name": "listar_colunas",
-        "description": (
-            "Lista as colunas (nome, tipo, descrição, se aceita nulo) de uma "
-            "tabela do dataset, ou de todas as tabelas se nenhuma for informada."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "table": {
-                    "type": "string",
-                    "description": "Nome da tabela. Omita para listar as colunas de todas as tabelas.",
+        "function": {
+            "name": "listar_colunas",
+            "description": (
+                "Lista as colunas (nome, tipo, descrição, se aceita nulo) de uma "
+                "tabela do dataset, ou de todas as tabelas se nenhuma for informada."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "table": {
+                        "type": "string",
+                        "description": "Nome da tabela. Omita para listar as colunas de todas as tabelas.",
+                    },
                 },
             },
         },
     },
     {
         "type": "function",
-        "name": "obter_resumo",
-        "description": "Devolve um resumo do dataset: nome, tabelas disponíveis, total de linhas e colunas.",
-        "parameters": {"type": "object", "properties": {}},
-    },
-    {
-        "type": "function",
-        "name": "buscar_registros",
-        "description": "Devolve uma amostra de linhas de uma tabela do dataset.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "table": {"type": "string", "description": "Nome da tabela."},
-                "limit": {
-                    "type": "integer",
-                    "description": "Quantidade máxima de linhas a devolver (padrão 10, máximo 50).",
-                },
-                "offset": {
-                    "type": "integer",
-                    "description": "Quantas linhas pular a partir do início (padrão 0).",
-                },
-            },
-            "required": ["table"],
+        "function": {
+            "name": "obter_resumo",
+            "description": "Devolve um resumo do dataset: nome, tabelas disponíveis, total de linhas e colunas.",
+            "parameters": {"type": "object", "properties": {}},
         },
     },
     {
         "type": "function",
-        "name": "filtrar_dados",
-        "description": "Devolve as linhas de uma tabela que atendem a uma condição sobre uma coluna.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "table": {"type": "string", "description": "Nome da tabela."},
-                "column": {"type": "string", "description": "Nome da coluna a filtrar."},
-                "operator": {
-                    "type": "string",
-                    "enum": ["=", "!=", ">", "<", ">=", "<=", "contains"],
-                    "description": "Operador de comparação.",
+        "function": {
+            "name": "buscar_registros",
+            "description": "Devolve uma amostra de linhas de uma tabela do dataset.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "table": {"type": "string", "description": "Nome da tabela."},
+                    "limit": {
+                        "type": "integer",
+                        "description": "Quantidade máxima de linhas a devolver (padrão 10, máximo 50).",
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "description": "Quantas linhas pular a partir do início (padrão 0).",
+                    },
                 },
-                "value": {"type": "string", "description": "Valor a comparar."},
+                "required": ["table"],
             },
-            "required": ["table", "column", "operator", "value"],
         },
     },
     {
         "type": "function",
-        "name": "calcular_estatisticas",
-        "description": (
-            "Calcula estatísticas de uma coluna: soma, média, mínimo, máximo e "
-            "contagem de nulos (colunas numéricas/moeda), ou valores mais "
-            "frequentes (colunas de texto)."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "table": {"type": "string", "description": "Nome da tabela."},
-                "column": {"type": "string", "description": "Nome da coluna."},
+        "function": {
+            "name": "filtrar_dados",
+            "description": "Devolve as linhas de uma tabela que atendem a uma condição sobre uma coluna.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "table": {"type": "string", "description": "Nome da tabela."},
+                    "column": {"type": "string", "description": "Nome da coluna a filtrar."},
+                    "operator": {
+                        "type": "string",
+                        "enum": ["=", "!=", ">", "<", ">=", "<=", "contains"],
+                        "description": "Operador de comparação.",
+                    },
+                    "value": {"type": "string", "description": "Valor a comparar."},
+                },
+                "required": ["table", "column", "operator", "value"],
             },
-            "required": ["table", "column"],
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "calcular_estatisticas",
+            "description": (
+                "Calcula estatísticas de uma coluna: soma, média, mínimo, máximo, "
+                "contagem de nulos e de valores não numéricos (colunas numéricas/moeda), "
+                "ou valores mais frequentes (colunas de texto)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "table": {"type": "string", "description": "Nome da tabela."},
+                    "column": {"type": "string", "description": "Nome da coluna."},
+                },
+                "required": ["table", "column"],
+            },
         },
     },
 ]
 
 
 class _MissingApiKeyError(Exception):
-    """GEMINI_API_KEY não configurada."""
+    """GROQ_API_KEY não configurada."""
 
 
 class _RateLimitError(Exception):
-    """Limite da API Gemini (HTTP 429) atingido."""
+    """Limite da API Groq (HTTP 429) atingido."""
+
+
+class _TimeoutError(Exception):
+    """A requisição à API Groq estourou o tempo limite."""
 
 
 class _ModelCommunicationError(Exception):
-    """Erro de rede/servidor ao falar com a API Gemini."""
+    """Erro de rede/servidor ao falar com a API Groq."""
+
+
+class _ModelUnavailableError(Exception):
+    """Modelo configurado não existe ou está indisponível na Groq."""
 
 
 class _InvalidModelResponseError(Exception):
     """O modelo não produziu uma resposta de texto utilizável."""
 
 
-class GeminiAgentService(AgentService):
-    """Agente real: usa a API Gemini (Interactions API) com function calling
-    sobre as tools de `dataset_service` para responder perguntas com base
-    exclusivamente nos dados do dataset carregado."""
+class GroqAgentService(AgentService):
+    """Agente real: usa a API Groq (chat completions, compatível com o padrão
+    OpenAI) com function calling sobre as tools de `dataset_service` para
+    responder perguntas com base exclusivamente nos dados do dataset
+    carregado."""
 
-    SOURCE = "gemini"
+    SOURCE = "groq"
 
-    def __init__(self, client: genai.Client | None = None, model: str | None = None) -> None:
+    def __init__(self, client: groq.Groq | None = None, model: str | None = None) -> None:
         self._client = client
-        self._model = model or os.getenv("GEMINI_MODEL", DEFAULT_MODEL)
+        self._model = model or os.getenv("GROQ_MODEL", DEFAULT_MODEL)
 
     def analyze(
         self, question: str, dataset_context: DatasetContext | None = None
@@ -196,10 +216,10 @@ class GeminiAgentService(AgentService):
         try:
             client = self._get_client()
         except _MissingApiKeyError:
-            logger.error("GEMINI_API_KEY não configurada.")
+            logger.error("GROQ_API_KEY não configurada.")
             return self._error(
                 "Configuração ausente",
-                "A chave da API Gemini (GEMINI_API_KEY) não está configurada no servidor.",
+                "A chave da API Groq (GROQ_API_KEY) não está configurada no servidor.",
             )
 
         tools = self._build_tools(dataset_context.datasetId)
@@ -207,19 +227,31 @@ class GeminiAgentService(AgentService):
         try:
             answer = self._run_conversation(client, trimmed, tools)
         except _RateLimitError:
-            logger.exception("Limite da API Gemini excedido.")
+            logger.exception("Limite da API Groq excedido.")
             return self._error(
                 "Limite atingido",
-                "O limite de uso da API Gemini foi atingido. Tente novamente em instantes.",
+                "O limite de uso da API Groq foi atingido. Tente novamente em instantes.",
+            )
+        except _TimeoutError:
+            logger.exception("Timeout ao falar com a API Groq.")
+            return self._error(
+                "Tempo esgotado",
+                "A requisição ao serviço de IA demorou demais. Tente novamente.",
             )
         except _ModelCommunicationError:
-            logger.exception("Erro de comunicação com a API Gemini.")
+            logger.exception("Erro de comunicação com a API Groq.")
             return self._error(
                 "Falha de comunicação",
                 "Não foi possível falar com o serviço de IA no momento. Tente novamente.",
             )
+        except _ModelUnavailableError:
+            logger.exception("Modelo Groq indisponível.")
+            return self._error(
+                "Modelo indisponível",
+                "O modelo de IA configurado não está disponível no momento.",
+            )
         except _InvalidModelResponseError:
-            logger.exception("Resposta inválida do modelo Gemini.")
+            logger.exception("Resposta inválida do modelo Groq.")
             return self._error(
                 "Resposta inválida",
                 "O modelo não conseguiu produzir uma resposta válida para esta pergunta.",
@@ -229,13 +261,13 @@ class GeminiAgentService(AgentService):
             status="success", source=self.SOURCE, result=TextQueryResult(answer=answer)
         )
 
-    def _get_client(self) -> genai.Client:
+    def _get_client(self) -> groq.Groq:
         if self._client is not None:
             return self._client
-        api_key = os.getenv("GEMINI_API_KEY")
+        api_key = os.getenv("GROQ_API_KEY")
         if not api_key:
             raise _MissingApiKeyError()
-        self._client = genai.Client(api_key=api_key)
+        self._client = groq.Groq(api_key=api_key)
         return self._client
 
     def _build_tools(self, dataset_id: str) -> dict[str, Callable[..., dict[str, Any]]]:
@@ -255,65 +287,78 @@ class GeminiAgentService(AgentService):
 
     def _run_conversation(
         self,
-        client: genai.Client,
+        client: groq.Groq,
         question: str,
         tools: dict[str, Callable[..., dict[str, Any]]],
     ) -> str:
-        previous_id: str | None = None
-        current_input: Any = question
+        messages: list[Any] = [
+            {"role": "system", "content": SYSTEM_INSTRUCTION},
+            {"role": "user", "content": question},
+        ]
 
         for _ in range(MAX_TOOL_ITERATIONS):
             try:
-                interaction = client.interactions.create(
+                response = client.chat.completions.create(
                     model=self._model,
-                    input=current_input,
+                    messages=messages,
                     tools=TOOL_DECLARATIONS,
-                    system_instruction=SYSTEM_INSTRUCTION,
-                    previous_interaction_id=previous_id,
+                    tool_choice="auto",
                 )
+            except groq.RateLimitError as exc:
+                raise _RateLimitError() from exc
+            except groq.APITimeoutError as exc:
+                raise _TimeoutError() from exc
+            except groq.NotFoundError as exc:
+                raise _ModelUnavailableError() from exc
+            except groq.APIConnectionError as exc:
+                raise _ModelCommunicationError() from exc
+            except groq.APIStatusError as exc:
+                raise _ModelCommunicationError() from exc
             except Exception as exc:
-                status_code = getattr(exc, "status_code", None)
-                if status_code is None:
-                    status_code = getattr(exc, "code", None)
-                if status_code == 429:
-                    raise _RateLimitError() from exc
                 raise _ModelCommunicationError() from exc
 
-            function_results = []
-            for step in interaction.steps:
-                if getattr(step, "type", None) != "function_call":
-                    continue
+            message = response.choices[0].message
+            tool_calls = message.tool_calls
 
-                tool = tools.get(step.name)
-                if tool is None:
-                    output: dict[str, Any] = {"error": f"Ferramenta '{step.name}' não existe."}
+            if not tool_calls:
+                content = message.content
+                if not content or not content.strip():
+                    raise _InvalidModelResponseError()
+                return content
+
+            messages.append(message)
+
+            for tool_call in tool_calls:
+                name = tool_call.function.name
+                tool = tools.get(name)
+
+                try:
+                    args = json.loads(tool_call.function.arguments)
+                except (TypeError, ValueError) as exc:
+                    output: dict[str, Any] = {
+                        "error": f"Argumentos inválidos para '{name}': {exc}"
+                    }
                 else:
-                    try:
-                        output = tool(**step.arguments)
-                    except DatasetToolError as exc:
-                        output = {"error": str(exc)}
-                    except TypeError as exc:
-                        output = {"error": f"Parâmetros inválidos para '{step.name}': {exc}"}
+                    if tool is None:
+                        output = {"error": f"Ferramenta '{name}' não existe."}
+                    else:
+                        try:
+                            output = tool(**args)
+                        except DatasetToolError as exc:
+                            output = {"error": str(exc)}
+                        except TypeError as exc:
+                            output = {
+                                "error": f"Parâmetros inválidos para '{name}': {exc}"
+                            }
 
-                function_results.append(
+                messages.append(
                     {
-                        "type": "function_result",
-                        "name": step.name,
-                        "call_id": step.id,
-                        "result": [
-                            {"type": "text", "text": json.dumps(output, ensure_ascii=False)}
-                        ],
+                        "tool_call_id": tool_call.id,
+                        "role": "tool",
+                        "name": name,
+                        "content": json.dumps(output, ensure_ascii=False),
                     }
                 )
-
-            if not function_results:
-                text = interaction.output_text
-                if not text or not text.strip():
-                    raise _InvalidModelResponseError()
-                return text
-
-            previous_id = interaction.id
-            current_input = function_results
 
         raise _InvalidModelResponseError()
 
@@ -325,4 +370,4 @@ class GeminiAgentService(AgentService):
         )
 
 
-agent_service: AgentService = GeminiAgentService()
+agent_service: AgentService = GroqAgentService()

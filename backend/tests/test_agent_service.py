@@ -3,16 +3,15 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
+import groq
 import httpx
 import pytest
-from google.genai import errors as genai_errors
-from google.genai._gaos.lib import compat_errors
 
 from schemas.models import DatasetContext, ErrorQueryResult, TextQueryResult
-from services.agent_service import GeminiAgentService
+from services.agent_service import GroqAgentService
 
 
-class FakeInteractions:
+class FakeCompletions:
     def __init__(self, responses):
         self._responses = list(responses)
         self.calls: list[dict] = []
@@ -25,17 +24,25 @@ class FakeInteractions:
         return response
 
 
+class FakeChat:
+    def __init__(self, responses):
+        self.completions = FakeCompletions(responses)
+
+
 class FakeClient:
     def __init__(self, responses):
-        self.interactions = FakeInteractions(responses)
+        self.chat = FakeChat(responses)
 
 
-def make_interaction(id_: str, steps=None, output_text: str | None = None):
-    return SimpleNamespace(id=id_, steps=steps or [], output_text=output_text)
+def make_response(content: str | None = None, tool_calls: list | None = None):
+    message = SimpleNamespace(content=content, tool_calls=tool_calls or [])
+    choice = SimpleNamespace(message=message)
+    return SimpleNamespace(choices=[choice])
 
 
-def make_function_call_step(name: str, arguments: dict, call_id: str):
-    return SimpleNamespace(type="function_call", name=name, arguments=arguments, id=call_id)
+def make_tool_call(name: str, arguments: dict, call_id: str):
+    function = SimpleNamespace(name=name, arguments=json.dumps(arguments))
+    return SimpleNamespace(id=call_id, function=function)
 
 
 def make_context(dataset_id: str) -> DatasetContext:
@@ -48,48 +55,54 @@ def make_context(dataset_id: str) -> DatasetContext:
     )
 
 
+def _http_status_error(exc_class, status_code: int, message: str = "erro"):
+    request = httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions")
+    response = httpx.Response(status_code, request=request)
+    return exc_class(message, response=response, body=None)
+
+
 def test_empty_question_returns_error_without_calling_client():
-    service = GeminiAgentService(client=FakeClient([]))
+    service = GroqAgentService(client=FakeClient([]))
     response = service.analyze("   ", dataset_context=None)
     assert response.status == "error"
     assert isinstance(response.result, ErrorQueryResult)
 
 
 def test_missing_dataset_context_returns_error_without_calling_client():
-    service = GeminiAgentService(client=FakeClient([]))
+    service = GroqAgentService(client=FakeClient([]))
     response = service.analyze("Qual o total?", dataset_context=None)
     assert response.status == "error"
     assert "dataset" in response.result.message.lower()
 
 
 def test_missing_api_key_returns_error(monkeypatch, stored_dataset_id):
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    service = GeminiAgentService()
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    service = GroqAgentService()
     response = service.analyze("Qual o total?", dataset_context=make_context(stored_dataset_id))
     assert response.status == "error"
-    assert "GEMINI_API_KEY" in response.result.message
+    assert "GROQ_API_KEY" in response.result.message
 
 
 def test_direct_text_answer_without_tool_call(stored_dataset_id):
-    client = FakeClient([make_interaction("int-1", output_text="Existem 3 fornecedores.")])
-    service = GeminiAgentService(client=client)
+    client = FakeClient([make_response(content="Existem 3 fornecedores.")])
+    service = GroqAgentService(client=client)
     response = service.analyze(
         "Quantos fornecedores existem?", dataset_context=make_context(stored_dataset_id)
     )
     assert response.status == "success"
-    assert response.source == "gemini"
+    assert response.source == "groq"
     assert response.result == TextQueryResult(answer="Existem 3 fornecedores.")
 
 
 def test_answers_after_one_real_tool_call(stored_dataset_id):
-    call_step = make_function_call_step("obter_resumo", {}, "call-1")
+    tool_call = make_tool_call("obter_resumo", {}, "call-1")
     client = FakeClient(
         [
-            make_interaction("int-1", steps=[call_step]),
-            make_interaction("int-2", output_text="O dataset tem 1 tabela (fornecedores)."),
+            make_response(tool_calls=[tool_call]),
+            make_response(content="O dataset tem 1 tabela (fornecedores)."),
         ]
     )
-    service = GeminiAgentService(client=client)
+    service = GroqAgentService(client=client)
     response = service.analyze(
         "Quantas tabelas tem o dataset?", dataset_context=make_context(stored_dataset_id)
     )
@@ -97,105 +110,116 @@ def test_answers_after_one_real_tool_call(stored_dataset_id):
     assert response.status == "success"
     assert response.result.answer == "O dataset tem 1 tabela (fornecedores)."
 
-    second_call_kwargs = client.interactions.calls[1]
-    assert second_call_kwargs["previous_interaction_id"] == "int-1"
-    function_result = second_call_kwargs["input"][0]
-    assert function_result["name"] == "obter_resumo"
-    assert function_result["call_id"] == "call-1"
-    payload = json.loads(function_result["result"][0]["text"])
+    second_call_messages = client.chat.completions.calls[1]["messages"]
+    tool_message = second_call_messages[-1]
+    assert tool_message["role"] == "tool"
+    assert tool_message["tool_call_id"] == "call-1"
+    assert tool_message["name"] == "obter_resumo"
+    payload = json.loads(tool_message["content"])
     assert payload["datasetName"] == "Dataset de teste"
 
 
 def test_unknown_tool_is_reported_back_to_model_and_recovers(stored_dataset_id):
-    call_step = make_function_call_step("ferramenta_fantasma", {}, "call-1")
+    tool_call = make_tool_call("ferramenta_fantasma", {}, "call-1")
     client = FakeClient(
         [
-            make_interaction("int-1", steps=[call_step]),
-            make_interaction("int-2", output_text="Não sei responder isso."),
+            make_response(tool_calls=[tool_call]),
+            make_response(content="Não sei responder isso."),
         ]
     )
-    service = GeminiAgentService(client=client)
+    service = GroqAgentService(client=client)
     response = service.analyze("Pergunta qualquer", dataset_context=make_context(stored_dataset_id))
 
     assert response.status == "success"
-    function_result = client.interactions.calls[1]["input"][0]
-    payload = json.loads(function_result["result"][0]["text"])
+    tool_message = client.chat.completions.calls[1]["messages"][-1]
+    payload = json.loads(tool_message["content"])
     assert "error" in payload
 
 
 def test_tool_execution_error_is_reported_back_to_model(stored_dataset_id):
-    call_step = make_function_call_step("listar_colunas", {"table": "inexistente"}, "call-1")
+    tool_call = make_tool_call("listar_colunas", {"table": "inexistente"}, "call-1")
     client = FakeClient(
         [
-            make_interaction("int-1", steps=[call_step]),
-            make_interaction("int-2", output_text="Essa tabela não existe."),
+            make_response(tool_calls=[tool_call]),
+            make_response(content="Essa tabela não existe."),
         ]
     )
-    service = GeminiAgentService(client=client)
+    service = GroqAgentService(client=client)
     response = service.analyze(
         "Liste as colunas de inexistente", dataset_context=make_context(stored_dataset_id)
     )
 
     assert response.status == "success"
-    function_result = client.interactions.calls[1]["input"][0]
-    payload = json.loads(function_result["result"][0]["text"])
+    tool_message = client.chat.completions.calls[1]["messages"][-1]
+    payload = json.loads(tool_message["content"])
     assert "não existe" in payload["error"]
 
 
+def test_invalid_tool_arguments_json_is_reported_back_to_model(stored_dataset_id):
+    bad_tool_call = SimpleNamespace(
+        id="call-1",
+        function=SimpleNamespace(name="obter_resumo", arguments="{not valid json"),
+    )
+    client = FakeClient(
+        [
+            make_response(tool_calls=[bad_tool_call]),
+            make_response(content="Não consegui processar isso."),
+        ]
+    )
+    service = GroqAgentService(client=client)
+    response = service.analyze("Pergunta qualquer", dataset_context=make_context(stored_dataset_id))
+
+    assert response.status == "success"
+    tool_message = client.chat.completions.calls[1]["messages"][-1]
+    payload = json.loads(tool_message["content"])
+    assert "error" in payload
+
+
 def test_rate_limit_error_returns_friendly_message(stored_dataset_id):
-    client = FakeClient([genai_errors.ClientError(429, {"error": {"message": "quota exceeded"}})])
-    service = GeminiAgentService(client=client)
+    client = FakeClient([_http_status_error(groq.RateLimitError, 429, "quota exceeded")])
+    service = GroqAgentService(client=client)
     response = service.analyze("Qual o total?", dataset_context=make_context(stored_dataset_id))
     assert response.status == "error"
     assert "limite" in response.result.title.lower()
 
 
-def test_real_interactions_api_rate_limit_error_returns_friendly_message(stored_dataset_id):
-    """Exercises the *real* exception shape raised by the installed google-genai
-    2.x Interactions API (google.genai._gaos.lib.compat_errors.RateLimitError),
-    not just the older google.genai.errors.ClientError shape covered above."""
-    response_obj = httpx.Response(
-        status_code=429, request=httpx.Request("POST", "https://example.com")
-    )
-    rate_limit_error = compat_errors.RateLimitError(
-        "Error code: 429 - quota exceeded",
-        response=response_obj,
-        body={"error": {"message": "quota exceeded"}},
-    )
-    client = FakeClient([rate_limit_error])
-    service = GeminiAgentService(client=client)
+def test_timeout_error_returns_friendly_message(stored_dataset_id):
+    request = httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions")
+    client = FakeClient([groq.APITimeoutError(request=request)])
+    service = GroqAgentService(client=client)
     response = service.analyze("Qual o total?", dataset_context=make_context(stored_dataset_id))
     assert response.status == "error"
-    assert "limite" in response.result.title.lower()
+    assert "tempo" in response.result.title.lower()
 
 
-def test_server_error_returns_communication_failure_message(stored_dataset_id):
-    client = FakeClient([genai_errors.ServerError(500, {"error": {"message": "internal"}})])
-    service = GeminiAgentService(client=client)
+def test_model_unavailable_error_returns_friendly_message(stored_dataset_id):
+    client = FakeClient([_http_status_error(groq.NotFoundError, 404, "model not found")])
+    service = GroqAgentService(client=client)
     response = service.analyze("Qual o total?", dataset_context=make_context(stored_dataset_id))
     assert response.status == "error"
-    assert "comunica" in response.result.title.lower()
+    assert "indispon" in response.result.title.lower()
 
 
-def test_network_error_returns_communication_failure_message(stored_dataset_id):
-    client = FakeClient([ConnectionError("connection reset")])
-    service = GeminiAgentService(client=client)
+def test_connection_error_returns_communication_failure_message(stored_dataset_id):
+    request = httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions")
+    client = FakeClient([groq.APIConnectionError(request=request)])
+    service = GroqAgentService(client=client)
     response = service.analyze("Qual o total?", dataset_context=make_context(stored_dataset_id))
     assert response.status == "error"
     assert "comunica" in response.result.title.lower()
 
 
 def test_blank_final_response_returns_invalid_response_error(stored_dataset_id):
-    client = FakeClient([make_interaction("int-1", output_text="   ")])
-    service = GeminiAgentService(client=client)
+    client = FakeClient([make_response(content="   ")])
+    service = GroqAgentService(client=client)
     response = service.analyze("Qual o total?", dataset_context=make_context(stored_dataset_id))
     assert response.status == "error"
     assert "inválida" in response.result.title.lower()
 
 
 def test_exceeding_tool_iterations_returns_generic_error(stored_dataset_id):
-    call_step = make_function_call_step("obter_resumo", {}, "call-loop")
-    client = FakeClient([make_interaction(f"int-{i}", steps=[call_step]) for i in range(5)])
-    service = GeminiAgentService(client=client)
+    tool_call = make_tool_call("obter_resumo", {}, "call-loop")
+    client = FakeClient([make_response(tool_calls=[tool_call]) for _ in range(5)])
+    service = GroqAgentService(client=client)
     response = service.analyze("Pergunta qualquer", dataset_context=make_context(stored_dataset_id))
     assert response.status == "error"
