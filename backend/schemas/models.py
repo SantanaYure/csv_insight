@@ -1,9 +1,9 @@
 """Schemas Pydantic que espelham os tipos usados pelo front-end.
 
-Fonte de verdade: `src/types/dataset.ts`, `src/types/query.ts`,
-`src/types/message.ts` e `src/types/api.ts`. Os nomes de campo usam
+Fonte de verdade: `frontend/src/types/dataset.ts`, `frontend/src/types/query.ts`,
+`frontend/src/types/message.ts` e `frontend/src/types/api.ts`. Os nomes de campo usam
 camelCase de propósito, para que o JSON produzido bata exatamente com o
-que `src/services/apiDataService.ts` já espera (nenhuma tradução é feita
+que `frontend/src/services/apiDataService.ts` já espera (nenhuma tradução é feita
 no front-end).
 """
 
@@ -40,6 +40,22 @@ class DatasetTable(BaseModel):
     preview: list[dict[str, Any]]
 
 
+class CleaningReport(BaseModel):
+    """Relatorio conservador da limpeza aplicada a cada tabela."""
+
+    originalRows: int
+    finalRows: int
+    emptyRowsRemoved: int = 0
+    duplicatesRemoved: int
+    removedColumns: list[str] = Field(default_factory=list)
+    nullValues: dict[str, int] = Field(default_factory=dict)
+    detectedTypes: dict[str, str] = Field(default_factory=dict)
+    inconsistentColumns: dict[str, list[str]] = Field(default_factory=dict)
+    trimmedTextValues: int = 0
+    convertedNumericColumns: list[str] = Field(default_factory=list)
+    normalizedDateColumns: list[str] = Field(default_factory=list)
+
+
 class Dataset(BaseModel):
     id: str
     name: str
@@ -52,6 +68,7 @@ class Dataset(BaseModel):
     sourceFileSize: int | None = None
     dictionaryFileName: str | None = None
     summary: str | None = None
+    cleaningReport: dict[str, "CleaningReport"] = Field(default_factory=dict)
 
 
 # --- query.ts -----------------------------------------------------------

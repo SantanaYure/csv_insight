@@ -1,6 +1,7 @@
 import type { QueryResult, TableColumnSpec, TableQueryResult } from '../../types/query';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { formatNumber } from '../../utils/formatNumber';
+import { humanizeText } from './humanizeText';
 
 /** Formata uma célula conforme o tipo declarado na coluna. */
 export function formatCell(
@@ -36,16 +37,29 @@ function escapeCsv(value: string): string {
 export function resultToPlainText(result: QueryResult): string {
   switch (result.type) {
     case 'text':
-      return [result.answer, result.detail].filter(Boolean).join('\n');
+      return [result.answer, result.detail]
+        .filter(Boolean)
+        .map((text) => humanizeText(text ?? ''))
+        .join('\n');
     case 'table':
-      return [result.answer, result.title, tableToCsv(result)].filter(Boolean).join('\n');
+      return [
+        result.answer ? humanizeText(result.answer) : '',
+        result.title ? humanizeText(result.title) : '',
+        tableToCsv(result),
+      ]
+        .filter(Boolean)
+        .join('\n');
     case 'chart':
-      return [result.answer, result.chart.title, chartToText(result.chart.data, result.chart.xKey, result.chart.yKey)]
+      return [
+        result.answer ? humanizeText(result.answer) : '',
+        humanizeText(result.chart.title),
+        chartToText(result.chart.data, result.chart.xKey, result.chart.yKey),
+      ]
         .filter(Boolean)
         .join('\n');
     case 'combined':
       return [
-        result.answer,
+        humanizeText(result.answer),
         result.table ? tableToCsv(result.table) : '',
         result.chart
           ? chartToText(result.chart.chart.data, result.chart.chart.xKey, result.chart.chart.yKey)
@@ -54,7 +68,10 @@ export function resultToPlainText(result: QueryResult): string {
         .filter(Boolean)
         .join('\n');
     case 'error':
-      return [result.title, result.message, result.suggestion].filter(Boolean).join('\n');
+      return [result.title, result.message, result.suggestion]
+        .filter(Boolean)
+        .map((text) => humanizeText(text ?? ''))
+        .join('\n');
     default:
       return '';
   }
@@ -72,18 +89,19 @@ function chartToText(
 export function summarizeResult(result: QueryResult): string {
   switch (result.type) {
     case 'text':
-      return result.answer;
+      return humanizeText(result.answer);
     case 'table':
-      return (
-        result.answer ??
-        `${result.rows.length} ${result.rows.length === 1 ? 'linha' : 'linhas'} · ${result.title ?? 'resultado tabular'}.`
-      );
+      return result.answer
+        ? humanizeText(result.answer)
+        : `${result.rows.length} ${result.rows.length === 1 ? 'linha' : 'linhas'} · ${result.title ?? 'resultado tabular'}.`;
     case 'chart':
-      return result.answer ?? `${result.chart.title} · ${result.chart.data.length} pontos.`;
+      return result.answer
+        ? humanizeText(result.answer)
+        : `${result.chart.title} · ${result.chart.data.length} pontos.`;
     case 'combined':
-      return result.answer;
+      return humanizeText(result.answer);
     case 'error':
-      return result.message;
+      return humanizeText(result.message);
     default:
       return '';
   }

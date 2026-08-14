@@ -100,7 +100,7 @@ export function AssistantMessage({
   onRetry,
 }: {
   message: ChatMessageModel;
-  onRetry?: (question: string) => void;
+  onRetry?: (question: string, messageId: string) => void;
 }) {
   const isError = message.result?.type === 'error';
 
@@ -111,7 +111,9 @@ export function AssistantMessage({
           result={message.result}
           durationMs={message.durationMs}
           onRetry={
-            onRetry && message.question ? () => onRetry(message.question as string) : undefined
+            onRetry && message.question
+              ? () => onRetry(message.question as string, message.id)
+              : undefined
           }
         />
       ) : (
@@ -154,7 +156,7 @@ export function ChatMessageItem({
   onRetry,
 }: {
   message: ChatMessageModel;
-  onRetry?: (question: string) => void;
+  onRetry?: (question: string, messageId: string) => void;
 }) {
   if (message.role === 'user') return <UserMessage content={message.content} />;
   if (message.role === 'system') return <SystemMessage content={message.content} />;

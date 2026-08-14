@@ -35,9 +35,9 @@ const PREVIEW_ROWS = 5;
 const MAX_CSV_FILES = 40;
 
 /**
- * Lê o ZIP enviado, interpreta os CSVs e monta o `Dataset` da aplicação.
- * O arquivo de dicionário, quando presente, define tipos e descrições das
- * colunas; as demais planilhas viram tabelas consultáveis.
+ * Lê um CSV avulso ou um ZIP com CSVs e monta o `Dataset` da aplicação.
+ * O arquivo de dicionário, quando presente no ZIP, define tipos e descrições
+ * das colunas; os demais arquivos viram tabelas consultáveis.
  *
  * Todo o trabalho pesado (parse do CSV, inferência de tipos, conversão de
  * valores) é assíncrono e cede o controle ao navegador periodicamente, para
@@ -47,18 +47,19 @@ export async function readZipDataset(
   file: File,
   onProgress?: (progress: IngestionProgress) => void,
 ): Promise<IngestedDataset> {
-  const files = await unzipFile(file);
-  const csvEntries = Object.entries(files).filter(([name]) => isUsableCsv(name));
+  const csvEntries = file.name.toLowerCase().endsWith('.csv')
+    ? [[file.name, new Uint8Array(await file.arrayBuffer())] as [string, Uint8Array]]
+    : Object.entries(await unzipFile(file)).filter(([name]) => isUsableCsv(name));
 
   if (csvEntries.length === 0) {
     throw new DatasetIngestionError(
-      'Nenhum arquivo .csv foi encontrado dentro do ZIP. Verifique o conteúdo do pacote e envie novamente.',
+      'Não foi possível encontrar dados CSV nesse arquivo. Envie um CSV ou um ZIP com pelo menos um CSV.',
     );
   }
 
   if (csvEntries.length > MAX_CSV_FILES) {
     throw new DatasetIngestionError(
-      `O ZIP contém ${csvEntries.length} arquivos CSV. O limite por conjunto de dados é de ${MAX_CSV_FILES}.`,
+      `O arquivo contém ${csvEntries.length} CSVs. O limite por conjunto de dados é de ${MAX_CSV_FILES}.`,
     );
   }
 
@@ -71,7 +72,7 @@ export async function readZipDataset(
 
   if (tableEntries.length === 0) {
     throw new DatasetIngestionError(
-      'O ZIP contém apenas o dicionário de dados. Inclua ao menos um arquivo CSV com registros.',
+      'O ZIP contém apenas o dicionário de dados. Inclua ao menos um CSV com registros.',
     );
   }
 
@@ -174,7 +175,7 @@ function toTableId(fileName: string): string {
 }
 
 function datasetNameFromFile(fileName: string): string {
-  const base = fileName.replace(/\.zip$/i, '').replace(/[_-]+/g, ' ').trim();
+  const base = fileName.replace(/\.(zip|csv)$/i, '').replace(/[_-]+/g, ' ').trim();
   if (!base) return 'Conjunto de dados';
   return base.charAt(0).toUpperCase() + base.slice(1);
 }

@@ -1,41 +1,32 @@
 from __future__ import annotations
 
-import json
 from types import SimpleNamespace
 
-import httpx
-import pytest
-from google.genai import errors as genai_errors
-from google.genai._gaos.lib import compat_errors
+from pydantic_ai import capture_run_messages
+from pydantic_ai.exceptions import ModelHTTPError
+from pydantic_ai.models.test import TestModel
 
-from schemas.models import DatasetContext, ErrorQueryResult, TextQueryResult
-from services.agent_service import GeminiAgentService
-
-
-class FakeInteractions:
-    def __init__(self, responses):
-        self._responses = list(responses)
-        self.calls: list[dict] = []
-
-    def create(self, **kwargs):
-        self.calls.append(kwargs)
-        response = self._responses.pop(0)
-        if isinstance(response, Exception):
-            raise response
-        return response
+from agents.data_agent import DatasetAgentDeps, create_data_agent
+from schemas.models import DatasetContext, ErrorQueryResult
+from services.agent_service import (
+    PydanticAIAgentService,
+    _normalize_tool_call_name,
+    humanize_answer,
+)
+from services.dataset_service import DatasetService
 
 
-class FakeClient:
-    def __init__(self, responses):
-        self.interactions = FakeInteractions(responses)
+class FakeAgent:
+    def __init__(self, output: object = "Resposta baseada no dataset.", error: Exception | None = None):
+        self.output = output
+        self.error = error
+        self.calls: list[tuple[str, DatasetAgentDeps]] = []
 
-
-def make_interaction(id_: str, steps=None, output_text: str | None = None):
-    return SimpleNamespace(id=id_, steps=steps or [], output_text=output_text)
-
-
-def make_function_call_step(name: str, arguments: dict, call_id: str):
-    return SimpleNamespace(type="function_call", name=name, arguments=arguments, id=call_id)
+    def run_sync(self, prompt: str, *, deps: DatasetAgentDeps):
+        self.calls.append((prompt, deps))
+        if self.error is not None:
+            raise self.error
+        return SimpleNamespace(output=self.output)
 
 
 def make_context(dataset_id: str) -> DatasetContext:
@@ -48,154 +39,145 @@ def make_context(dataset_id: str) -> DatasetContext:
     )
 
 
-def test_empty_question_returns_error_without_calling_client():
-    service = GeminiAgentService(client=FakeClient([]))
-    response = service.analyze("   ", dataset_context=None)
+def test_empty_question_returns_error_without_calling_agent():
+    agent = FakeAgent()
+    response = PydanticAIAgentService(agent=agent).analyze("   ", dataset_context=None)
     assert response.status == "error"
     assert isinstance(response.result, ErrorQueryResult)
+    assert agent.calls == []
 
 
-def test_missing_dataset_context_returns_error_without_calling_client():
-    service = GeminiAgentService(client=FakeClient([]))
-    response = service.analyze("Qual o total?", dataset_context=None)
+def test_missing_dataset_context_returns_error_without_calling_agent():
+    agent = FakeAgent()
+    response = PydanticAIAgentService(agent=agent).analyze(
+        "Qual o total?", dataset_context=None
+    )
     assert response.status == "error"
     assert "dataset" in response.result.message.lower()
+    assert agent.calls == []
 
 
-def test_missing_api_key_returns_error(monkeypatch, stored_dataset_id):
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    service = GeminiAgentService()
-    response = service.analyze("Qual o total?", dataset_context=make_context(stored_dataset_id))
+def test_missing_groq_api_key_returns_error(monkeypatch, stored_dataset_id):
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    response = PydanticAIAgentService().analyze(
+        "Qual o total?", dataset_context=make_context(stored_dataset_id)
+    )
     assert response.status == "error"
-    assert "GEMINI_API_KEY" in response.result.message
+    assert "GROQ_API_KEY" in response.result.message
 
 
-def test_direct_text_answer_without_tool_call(stored_dataset_id):
-    client = FakeClient([make_interaction("int-1", output_text="Existem 3 fornecedores.")])
-    service = GeminiAgentService(client=client)
+def test_direct_text_answer_preserves_http_result_contract(stored_dataset_id):
+    agent = FakeAgent(output="Existem 3 fornecedores.")
+    service = PydanticAIAgentService(agent=agent)
+
     response = service.analyze(
         "Quantos fornecedores existem?", dataset_context=make_context(stored_dataset_id)
     )
-    assert response.status == "success"
-    assert response.source == "gemini"
-    assert response.result == TextQueryResult(answer="Existem 3 fornecedores.")
-
-
-def test_answers_after_one_real_tool_call(stored_dataset_id):
-    call_step = make_function_call_step("obter_resumo", {}, "call-1")
-    client = FakeClient(
-        [
-            make_interaction("int-1", steps=[call_step]),
-            make_interaction("int-2", output_text="O dataset tem 1 tabela (fornecedores)."),
-        ]
-    )
-    service = GeminiAgentService(client=client)
-    response = service.analyze(
-        "Quantas tabelas tem o dataset?", dataset_context=make_context(stored_dataset_id)
-    )
 
     assert response.status == "success"
-    assert response.result.answer == "O dataset tem 1 tabela (fornecedores)."
-
-    second_call_kwargs = client.interactions.calls[1]
-    assert second_call_kwargs["previous_interaction_id"] == "int-1"
-    function_result = second_call_kwargs["input"][0]
-    assert function_result["name"] == "obter_resumo"
-    assert function_result["call_id"] == "call-1"
-    payload = json.loads(function_result["result"][0]["text"])
-    assert payload["datasetName"] == "Dataset de teste"
+    assert response.source == "pydantic-ai-groq"
+    assert response.result.answer == "Existem 3 fornecedores."
+    assert agent.calls[0][1].dataset_id == stored_dataset_id
+    assert isinstance(agent.calls[0][1].dataset_service, DatasetService)
 
 
-def test_unknown_tool_is_reported_back_to_model_and_recovers(stored_dataset_id):
-    call_step = make_function_call_step("ferramenta_fantasma", {}, "call-1")
-    client = FakeClient(
-        [
-            make_interaction("int-1", steps=[call_step]),
-            make_interaction("int-2", output_text="Não sei responder isso."),
-        ]
+def test_humanize_answer_removes_raw_markdown_and_technical_column_note():
+    answer = "O valor total das notas fiscais (coluna **VALOR NOTA FISCAL**) é **R$ 3.371.754,84**."
+
+    assert humanize_answer(answer) == "O valor total das notas fiscais é R$ 3.371.754,84."
+
+
+def test_agent_service_humanizes_text_output_before_returning_it(stored_dataset_id):
+    agent = FakeAgent(
+        output="O valor total (coluna **VALOR_NOTA**) é **R$ 10,00**."
     )
-    service = GeminiAgentService(client=client)
-    response = service.analyze("Pergunta qualquer", dataset_context=make_context(stored_dataset_id))
+    service = PydanticAIAgentService(agent=agent)
 
-    assert response.status == "success"
-    function_result = client.interactions.calls[1]["input"][0]
-    payload = json.loads(function_result["result"][0]["text"])
-    assert "error" in payload
-
-
-def test_tool_execution_error_is_reported_back_to_model(stored_dataset_id):
-    call_step = make_function_call_step("listar_colunas", {"table": "inexistente"}, "call-1")
-    client = FakeClient(
-        [
-            make_interaction("int-1", steps=[call_step]),
-            make_interaction("int-2", output_text="Essa tabela não existe."),
-        ]
-    )
-    service = GeminiAgentService(client=client)
-    response = service.analyze(
-        "Liste as colunas de inexistente", dataset_context=make_context(stored_dataset_id)
-    )
-
-    assert response.status == "success"
-    function_result = client.interactions.calls[1]["input"][0]
-    payload = json.loads(function_result["result"][0]["text"])
-    assert "não existe" in payload["error"]
-
-
-def test_rate_limit_error_returns_friendly_message(stored_dataset_id):
-    client = FakeClient([genai_errors.ClientError(429, {"error": {"message": "quota exceeded"}})])
-    service = GeminiAgentService(client=client)
     response = service.analyze("Qual o total?", dataset_context=make_context(stored_dataset_id))
+
+    assert response.result.answer == "O valor total é R$ 10,00."
+
+
+def test_model_is_configurable_with_groq_model(monkeypatch):
+    monkeypatch.setenv("GROQ_MODEL", "custom/gpt-oss")
+    assert PydanticAIAgentService(agent=FakeAgent()).model == "custom/gpt-oss"
+
+
+def test_gpt_oss_tool_channel_suffix_is_normalized():
+    assert _normalize_tool_call_name("listar_colunas<|channel|>commentary") == "listar_colunas"
+    assert _normalize_tool_call_name("obter_resumo") == "obter_resumo"
+
+
+def test_pydantic_ai_controls_tool_calling_and_tool_delegates_to_dataset_service(
+    stored_dataset_id,
+):
+    agent = create_data_agent(
+        TestModel(call_tools=["obter_resumo"], custom_output_text="Resumo final.")
+    )
+    service = PydanticAIAgentService(agent=agent)
+
+    with capture_run_messages() as messages:
+        response = service.analyze(
+            "Quantas tabelas tem o dataset?", dataset_context=make_context(stored_dataset_id)
+        )
+
+    assert response.status == "success"
+    assert response.result.answer == "Resumo final."
+    tool_return = next(
+        part
+        for message in messages
+        for part in getattr(message, "parts", [])
+        if getattr(part, "tool_name", None) == "obter_resumo"
+        and hasattr(part, "content")
+    )
+    assert tool_return.content["datasetName"] == "Dataset de teste"
+
+
+def test_all_dataset_tools_are_registered():
+    agent = create_data_agent(TestModel(custom_output_text="ok"))
+    assert set(agent._function_toolset.tools) == {
+        "listar_colunas",
+        "obter_resumo",
+        "buscar_registros",
+        "filtrar_dados",
+        "calcular_estatisticas",
+    }
+
+
+def test_rate_limit_returns_friendly_message(stored_dataset_id):
+    agent = FakeAgent(error=ModelHTTPError(429, "openai/gpt-oss-20b", {"error": "quota"}))
+    response = PydanticAIAgentService(agent=agent).analyze(
+        "Qual o total?", dataset_context=make_context(stored_dataset_id)
+    )
     assert response.status == "error"
     assert "limite" in response.result.title.lower()
 
 
-def test_real_interactions_api_rate_limit_error_returns_friendly_message(stored_dataset_id):
-    """Exercises the *real* exception shape raised by the installed google-genai
-    2.x Interactions API (google.genai._gaos.lib.compat_errors.RateLimitError),
-    not just the older google.genai.errors.ClientError shape covered above."""
-    response_obj = httpx.Response(
-        status_code=429, request=httpx.Request("POST", "https://example.com")
+def test_oversized_request_returns_specific_message(stored_dataset_id):
+    agent = FakeAgent(
+        error=ModelHTTPError(
+            413,
+            "openai/gpt-oss-20b",
+            {
+                "error": {
+                    "code": "rate_limit_exceeded",
+                    "message": "Request too large; please reduce your message size",
+                }
+            },
+        )
     )
-    rate_limit_error = compat_errors.RateLimitError(
-        "Error code: 429 - quota exceeded",
-        response=response_obj,
-        body={"error": {"message": "quota exceeded"}},
+    response = PydanticAIAgentService(agent=agent).analyze(
+        "Liste o conteúdo", dataset_context=make_context(stored_dataset_id)
     )
-    client = FakeClient([rate_limit_error])
-    service = GeminiAgentService(client=client)
-    response = service.analyze("Qual o total?", dataset_context=make_context(stored_dataset_id))
     assert response.status == "error"
-    assert "limite" in response.result.title.lower()
+    assert response.result.title == "Consulta muito grande"
+    assert "tabela" in response.result.message
 
 
-def test_server_error_returns_communication_failure_message(stored_dataset_id):
-    client = FakeClient([genai_errors.ServerError(500, {"error": {"message": "internal"}})])
-    service = GeminiAgentService(client=client)
-    response = service.analyze("Qual o total?", dataset_context=make_context(stored_dataset_id))
-    assert response.status == "error"
-    assert "comunica" in response.result.title.lower()
-
-
-def test_network_error_returns_communication_failure_message(stored_dataset_id):
-    client = FakeClient([ConnectionError("connection reset")])
-    service = GeminiAgentService(client=client)
-    response = service.analyze("Qual o total?", dataset_context=make_context(stored_dataset_id))
-    assert response.status == "error"
-    assert "comunica" in response.result.title.lower()
-
-
-def test_blank_final_response_returns_invalid_response_error(stored_dataset_id):
-    client = FakeClient([make_interaction("int-1", output_text="   ")])
-    service = GeminiAgentService(client=client)
-    response = service.analyze("Qual o total?", dataset_context=make_context(stored_dataset_id))
+def test_blank_agent_response_returns_invalid_response_error(stored_dataset_id):
+    agent = FakeAgent(output="   ")
+    response = PydanticAIAgentService(agent=agent).analyze(
+        "Qual o total?", dataset_context=make_context(stored_dataset_id)
+    )
     assert response.status == "error"
     assert "inválida" in response.result.title.lower()
-
-
-def test_exceeding_tool_iterations_returns_generic_error(stored_dataset_id):
-    call_step = make_function_call_step("obter_resumo", {}, "call-loop")
-    client = FakeClient([make_interaction(f"int-{i}", steps=[call_step]) for i in range(5)])
-    service = GeminiAgentService(client=client)
-    response = service.analyze("Pergunta qualquer", dataset_context=make_context(stored_dataset_id))
-    assert response.status == "error"

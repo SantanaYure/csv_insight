@@ -1,7 +1,7 @@
 """Backend FastAPI do CSV Insight.
 
-Substitui progressivamente os mocks descritos em `src/services/mockDataService.ts`
-pelo contrato HTTP que `src/services/apiDataService.ts` já implementa (ver
+Substitui progressivamente os mocks descritos em `frontend/src/services/mockDataService.ts`
+pelo contrato HTTP que `frontend/src/services/apiDataService.ts` já implementa (ver
 README, seção "Integração futura com FastAPI"). Rodar com:
 
     uvicorn main:app --reload
@@ -17,14 +17,14 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-# Precisa rodar antes do `from routes import ...` abaixo: routes.analyze já
-# importa o GeminiAgentService, que lê GEMINI_MODEL do ambiente na
-# construção do módulo.
+# Precisa rodar antes do `from routes import ...` abaixo: a rota de análise
+# importa o AgentService, que lê GROQ_MODEL quando o agente é construído.
 load_dotenv()
 
 from routes import analyze, datasets, health
 
 DEFAULT_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173"
+DEFAULT_ORIGIN_REGEX = r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
 ALLOWED_ORIGINS = [
     origin.strip()
     for origin in os.getenv("CORS_ORIGINS", DEFAULT_ORIGINS).split(",")
@@ -33,13 +33,14 @@ ALLOWED_ORIGINS = [
 
 app = FastAPI(
     title="CSV Insight API",
-    description="Ingestão de datasets (ZIP de CSVs) e análise em linguagem natural.",
+    description="Ingestão de CSVs ou ZIPs com CSVs e análise em linguagem natural.",
     version="0.1.0",
 )
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=os.getenv("CORS_ORIGIN_REGEX", DEFAULT_ORIGIN_REGEX),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -48,7 +49,7 @@ app.add_middleware(
 
 def _error_body(message: str) -> dict[str, str]:
     # `status`/`message` seguem o formato pedido na especificação; `detail`
-    # é o que `src/types/api.ts` (`readErrorMessage`) já sabe ler no
+    # é o que `frontend/src/types/api.ts` já sabe ler no
     # front-end (`payload.detail ?? payload.message`).
     return {"status": "error", "message": message, "detail": message}
 

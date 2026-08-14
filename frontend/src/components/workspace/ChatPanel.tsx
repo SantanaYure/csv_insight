@@ -38,9 +38,9 @@ export function ChatPanel({ dataset, suggestions, pendingQuestion, onConsumePend
   }, [ask, isAsking, question]);
 
   const handleRetry = useCallback(
-    (retryQuestion: string) => {
+    (retryQuestion: string, messageId: string) => {
       if (isAsking) return;
-      void ask(retryQuestion);
+      void ask(retryQuestion, { replaceMessageId: messageId });
     },
     [ask, isAsking],
   );

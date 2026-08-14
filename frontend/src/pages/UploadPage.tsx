@@ -18,8 +18,8 @@ const MAX_FILE_SIZE = 200 * 1024 * 1024;
 const uploadSchema = z.object({
   file: z
     .instanceof(File, { message: 'Selecione um arquivo para continuar.' })
-    .refine((file) => file.name.toLowerCase().endsWith('.zip'), {
-      message: 'O arquivo precisa ser um .zip.',
+    .refine((file) => /\.(csv|zip)$/i.test(file.name), {
+      message: 'Envie um arquivo .csv ou .zip.',
     })
     .refine((file) => file.size <= MAX_FILE_SIZE, {
       message: 'O arquivo excede o tamanho máximo de 200 MB.',
@@ -83,7 +83,7 @@ export function UploadPage() {
   if (upload.status === 'processing' || upload.status === 'success' || upload.status === 'error') {
     return (
       <ProcessingView
-        fileName={upload.file?.name ?? 'dados.zip'}
+        fileName={upload.file?.name ?? 'dados.csv'}
         status={upload.status}
         processingProgress={upload.processingProgress}
         steps={upload.steps}
@@ -126,7 +126,7 @@ export function UploadPage() {
         Envie seu conjunto de dados
       </Heading>
       <Text mt="12px" fontSize="17px" lineHeight={1.6} color="text.muted">
-        O arquivo ZIP deve conter um ou mais arquivos CSV e um dicionário de dados.
+        Envie um CSV ou um ZIP com um ou mais CSVs. O dicionário de dados é opcional.
       </Text>
 
       {missingDataset ? (
@@ -146,7 +146,7 @@ export function UploadPage() {
             <AlertCircle size={20} strokeWidth={1.9} />
           </Box>
           <Text m={0} fontSize="14px" lineHeight={1.55} color="text.secondary">
-            Nenhum conjunto de dados está carregado nesta sessão. Envie um arquivo ZIP para
+            Nenhum conjunto de dados está carregado nesta sessão. Envie um CSV ou ZIP para
             liberar o resumo, a consulta e o histórico.
           </Text>
         </Flex>
@@ -176,7 +176,7 @@ export function UploadPage() {
                 Arquivo inválido
               </Text>
               <Text mt="4px" fontSize="14px" lineHeight={1.55} color="text.muted">
-                {validationMessage} Envie um arquivo .zip de até 200 MB.
+                {validationMessage} Envie um arquivo .csv ou .zip de até 200 MB.
               </Text>
             </Box>
           </Flex>
@@ -242,15 +242,14 @@ export function UploadPage() {
           color="text.secondary"
         >
           <Box color="text.primary" fontWeight={500}>
-            dados.zip
+            dados.zip ou dados.csv
           </Box>
-          <Box>├─ notas_fiscais.csv</Box>
-          <Box>├─ itens.csv</Box>
-          <Box>├─ fornecedores.csv</Box>
-          <Box>└─ dicionario_dados.csv</Box>
+          <Box>├─ tabela_1.csv</Box>
+          <Box>├─ tabela_2.csv</Box>
+          <Box>└─ dicionario_dados.csv (opcional)</Box>
         </Box>
         <Text mt="14px" fontSize="14px" lineHeight={1.6} color="text.muted">
-          O dicionário descreve cada coluna com <Text as="span" fontFamily="mono">arquivo</Text>,{' '}
+          O sistema aceita qualquer estrutura de colunas. Se existir, o dicionário descreve cada coluna com <Text as="span" fontFamily="mono">arquivo</Text>,{' '}
           <Text as="span" fontFamily="mono">coluna</Text>, <Text as="span" fontFamily="mono">tipo</Text>{' '}
           e <Text as="span" fontFamily="mono">descricao</Text>. Ele é opcional: sem o dicionário, os
           tipos das colunas são inferidos a partir dos próprios valores.

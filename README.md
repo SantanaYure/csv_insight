@@ -1,14 +1,17 @@
 # CSV Insight
 
+O projeto está separado em duas aplicações: [`frontend/`](frontend/) contém o
+Vite/React e [`backend/`](backend/) contém a API FastAPI.
+
 Aplicação frontend que permite carregar um pacote ZIP com arquivos CSV e consultar esses dados
 em linguagem natural — sem escrever SQL. A interface implementa o design criado no Claude Design
 ("CSV Insight"), preservando tokens, espaçamentos, componentes, estados e comportamento
 responsivo.
 
-Por padrão (`VITE_USE_MOCKS=true`) tudo funciona com **dados mockados**, calculados no navegador.
-Um backend FastAPI (pasta [`backend/`](backend/)) já implementa o mesmo contrato consumido por
-`src/services/apiDataService.ts` — para usá-lo, veja [`backend/README.md`](backend/README.md) e
-ajuste `VITE_USE_MOCKS=false` no `.env` do front-end.
+Por padrão (`VITE_USE_MOCKS=false`) o front-end usa o backend FastAPI. O processamento local no
+navegador continua disponível com `VITE_USE_MOCKS=true`. O contrato HTTP é consumido por
+[`frontend/src/services/apiDataService.ts`](frontend/src/services/apiDataService.ts); veja também
+[`backend/README.md`](backend/README.md).
 
 ---
 
@@ -34,6 +37,7 @@ todo o estilo vem do tema do Chakra.
 ## Instalação
 
 ```bash
+cd frontend
 npm install
 ```
 
@@ -61,10 +65,13 @@ npm run preview
 
 ---
 
-## Formato do arquivo ZIP
+## Formato dos arquivos enviados
 
 A aplicação **começa vazia**: não há nenhum conjunto de dados pré-cadastrado. Tudo que aparece
-no resumo, na consulta e no histórico vem do ZIP que você envia em `/upload`.
+no resumo, na consulta e no histórico vem do CSV ou ZIP que você envia em `/upload`.
+
+Você pode enviar um CSV diretamente ou um ZIP com um ou mais CSVs. O dicionário
+de dados é opcional e o sistema aceita qualquer estrutura de colunas.
 
 ```
 dados.zip
@@ -126,14 +133,14 @@ conjunto realmente possui. Perguntas fora do alcance do motor recebem uma respos
 
 ## Serviço de dados
 
-O seletor fica em [`src/services/index.ts`](src/services/index.ts):
+O seletor fica em [`frontend/src/services/index.ts`](frontend/src/services/index.ts):
 
 ```ts
 export const dataService: DataService =
   import.meta.env.VITE_USE_MOCKS === 'true' ? mockDataService : apiDataService;
 ```
 
-Com `VITE_USE_MOCKS=true` (padrão) tudo roda no navegador: o ZIP é descompactado com `fflate`,
+Com `VITE_USE_MOCKS=true` tudo roda no navegador: o CSV é lido diretamente ou o ZIP é descompactado com `fflate`,
 os CSVs são interpretados com `papaparse` e as consultas são calculadas localmente. O conjunto
 fica no `sessionStorage` (limite de 4 MB; acima disso permanece só em memória), de modo que um
 recarregamento da página não perde os dados da sessão.
@@ -145,7 +152,7 @@ recarregamento da página não perde os dados da sessão.
 
 ## Variáveis de ambiente
 
-Copie `.env.example` para `.env`:
+Na pasta `frontend/`, copie `.env.example` para `.env`:
 
 ```bash
 cp .env.example .env
@@ -153,7 +160,7 @@ cp .env.example .env
 
 | Variável | Padrão | Descrição |
 | --- | --- | --- |
-| `VITE_USE_MOCKS` | `true` | `true` usa os mocks; qualquer outro valor usa o backend real. |
+| `VITE_USE_MOCKS` | `false` | `true` usa o processamento local; qualquer outro valor usa o backend real. |
 | `VITE_API_URL` | `http://localhost:8000/api` | URL base da API. |
 
 ---
@@ -161,7 +168,7 @@ cp .env.example .env
 ## Estrutura
 
 ```
-src/
+frontend/src/
 ├── app/            App, router e providers
 ├── pages/          Uma página por rota + a tela de processamento
 ├── layouts/        PublicLayout e ApplicationLayout
@@ -309,7 +316,7 @@ Inter, com fallback `system-ui, sans-serif`, pesos 400/500/600/700. A escala viv
    ```
 
 3. Endpoints implementados em `backend/routes/`, consumidos por
-   [`src/services/apiDataService.ts`](src/services/apiDataService.ts):
+   [`frontend/src/services/apiDataService.ts`](frontend/src/services/apiDataService.ts):
 
    | Método | Endpoint | Corpo | Resposta |
    | --- | --- | --- | --- |
@@ -319,7 +326,7 @@ Inter, com fallback `system-ui, sans-serif`, pesos 400/500/600/700. A escala viv
    | `GET` | `/datasets/{datasetId}/history` | — | `{ "data": ChatMessage[] }` |
    | `DELETE` | `/datasets/{datasetId}/history/{messageId}` | — | `204` |
 
-4. Os contratos de `Dataset`, `QueryResult` e `ChatMessage` estão em [`src/types`](src/types) e
+4. Os contratos de `Dataset`, `QueryResult` e `ChatMessage` estão em [`frontend/src/types`](frontend/src/types) e
    têm um schema Pydantic equivalente em [`backend/schemas/models.py`](backend/schemas/models.py).
    Erros devolvidos com `detail` ou `message` são convertidos em `ApiError` e exibidos como
    resultado do tipo `error` na conversa.

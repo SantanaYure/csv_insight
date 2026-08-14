@@ -5,7 +5,7 @@ import { useRef, useState, type DragEvent } from 'react';
 interface FileDropzoneProps {
   onSelectFile: (file: File) => void;
   isDisabled?: boolean;
-  /** Extensão aceita e tamanho máximo exibidos na legenda. */
+  /** Extensões aceitas e tamanho máximo exibidos na legenda. */
   accept?: string;
   maxSizeLabel?: string;
 }
@@ -14,7 +14,7 @@ interface FileDropzoneProps {
 export function FileDropzone({
   onSelectFile,
   isDisabled = false,
-  accept = '.zip',
+  accept = '.csv,.zip',
   maxSizeLabel = '200 MB',
 }: FileDropzoneProps) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -38,7 +38,7 @@ export function FileDropzone({
     <Box
       role="button"
       tabIndex={isDisabled ? -1 : 0}
-      aria-label="Selecionar arquivo ZIP para envio"
+      aria-label="Selecionar arquivo CSV ou ZIP para envio"
       aria-disabled={isDisabled}
       onClick={openPicker}
       onKeyDown={(event) => {
@@ -97,7 +97,7 @@ export function FileDropzone({
       </Flex>
 
       <Text m={0} fontSize="17px" fontWeight={600} color="text.primary">
-        Arraste o arquivo ZIP até aqui
+        Arraste o CSV ou ZIP até aqui
       </Text>
       <Text m={0} fontSize="14.5px" color="text.muted">
         ou selecione o arquivo no seu computador
@@ -116,7 +116,7 @@ export function FileDropzone({
       </Button>
 
       <Text mt="14px" fontSize="13px" color="text.muted">
-        Formato aceito: {accept} · Tamanho máximo: {maxSizeLabel}
+        Formato aceito: CSV ou ZIP · Tamanho máximo: {maxSizeLabel}
       </Text>
     </Box>
   );

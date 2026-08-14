@@ -148,8 +148,13 @@ export function ProcessingView({
 
       <Flex align="center" gap="12px" wrap="wrap" mt="22px">
         <Text m={0} fontSize="13.5px" color="text.muted">
-          Você pode fechar esta aba: o processamento continua.
+          Mantenha esta aba aberta até o processamento terminar.
         </Text>
+        {!isComplete ? (
+          <Button variant="secondary" onClick={onChooseAnother} ml={{ base: 0, sm: 'auto' }}>
+            Cancelar
+          </Button>
+        ) : null}
       </Flex>
     </PageContainer>
   );

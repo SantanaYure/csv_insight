@@ -5,6 +5,7 @@ import pytest
 from schemas.models import Dataset, DatasetColumn, DatasetTable
 from services.dataset_service import (
     DatasetToolError,
+    _bounded_tool_rows,
     buscar_registros,
     calcular_estatisticas,
     filtrar_dados,
@@ -12,6 +13,16 @@ from services.dataset_service import (
     obter_resumo,
     store,
 )
+
+
+def test_tool_rows_are_bounded_for_llm_context():
+    rows = [{"id": str(index), "description": "x" * 1_000} for index in range(20)]
+
+    bounded, truncated = _bounded_tool_rows(rows)
+
+    assert truncated is True
+    assert len(bounded) <= 10
+    assert len(str(bounded)) < 10_000
 
 
 def test_listar_colunas_returns_all_tables_when_no_table_given(stored_dataset_id):

@@ -1,6 +1,6 @@
 """Endpoints de dataset.
 
-O contrato canônico é o que `src/services/apiDataService.ts` e o README
+O contrato canônico é o que `frontend/src/services/apiDataService.ts` e o README
 ("Integração futura com FastAPI") já documentam:
 
     POST   /api/datasets                          multipart `file`
@@ -19,28 +19,17 @@ from fastapi import APIRouter, HTTPException, UploadFile, status
 from fastapi.responses import Response
 
 from schemas.models import ApiEnvelope, ChatMessage, Dataset
-from services.dataset_service import DatasetIngestionError, ingest_zip, store
+from services.dataset_service import store
+from services.dataset_upload_service import UploadRejectedError, dataset_upload_service
 
 router = APIRouter(prefix="/datasets", tags=["datasets"])
 
-MAX_UPLOAD_BYTES = 200 * 1024 * 1024
-
-
 async def _handle_upload(file: UploadFile) -> ApiEnvelope[Dataset]:
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="Nenhum arquivo enviado.")
-
-    content = await file.read()
-    if len(content) > MAX_UPLOAD_BYTES:
-        raise HTTPException(status_code=413, detail="Arquivo excede o tamanho máximo de 200 MB.")
-
     try:
-        ingested = ingest_zip(file.filename, len(content), content)
-    except DatasetIngestionError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    store.save(ingested.dataset, ingested.rows)
-    return ApiEnvelope(data=ingested.dataset)
+        dataset = await dataset_upload_service.upload(file)
+    except UploadRejectedError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    return ApiEnvelope(data=dataset)
 
 
 @router.post("", response_model=ApiEnvelope[Dataset], status_code=status.HTTP_201_CREATED)

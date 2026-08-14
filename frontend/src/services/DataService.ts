@@ -10,12 +10,21 @@ export interface UploadProgress {
   tableCount: number;
 }
 
+export interface UploadDatasetOptions {
+  /** Cancela a leitura local ou a requisição HTTP em andamento. */
+  signal?: AbortSignal;
+  /** Percentual de bytes enviados ao backend. */
+  onUploadProgress?: (percentage: number) => void;
+  /** Progresso de leitura das tabelas, quando disponível. */
+  onProcessingProgress?: (progress: UploadProgress) => void;
+}
+
 /**
  * Contrato único de acesso a dados. Nenhum componente deve chamar `fetch`
  * diretamente: sempre passe por uma implementação desta interface.
  */
 export interface DataService {
-  uploadDataset(file: File, onProgress?: (progress: UploadProgress) => void): Promise<Dataset>;
+  uploadDataset(file: File, options?: UploadDatasetOptions): Promise<Dataset>;
 
   getDataset(datasetId: string): Promise<Dataset>;
 

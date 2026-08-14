@@ -10,7 +10,7 @@ interface ChatContainerProps {
   isAsking: boolean;
   /** Conteúdo exibido quando ainda não há mensagens. */
   emptyState: React.ReactNode;
-  onRetry?: (question: string) => void;
+  onRetry?: (question: string, messageId: string) => void;
 }
 
 /** Área rolável da conversa, com rolagem automática para a última mensagem. */

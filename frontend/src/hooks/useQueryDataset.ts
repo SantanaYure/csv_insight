@@ -7,8 +7,13 @@ import { generateId } from '../utils/generateId';
 interface UseQueryDatasetResult {
   messages: ChatMessage[];
   isAsking: boolean;
-  ask: (question: string) => Promise<void>;
+  ask: (question: string, options?: AskOptions) => Promise<void>;
   clear: () => void;
+}
+
+interface AskOptions {
+  /** Remove a mensagem de erro que está sendo repetida antes de responder. */
+  replaceMessageId?: string;
 }
 
 /**
@@ -19,6 +24,7 @@ export function useQueryDataset(datasetId: string | undefined): UseQueryDatasetR
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isAsking, setIsAsking] = useState(false);
   const mounted = useRef(true);
+  const askingRef = useRef(false);
 
   useEffect(() => {
     mounted.current = true;
@@ -32,22 +38,31 @@ export function useQueryDataset(datasetId: string | undefined): UseQueryDatasetR
   }, []);
 
   const ask = useCallback(
-    async (question: string) => {
+    async (question: string, options: AskOptions = {}) => {
       const trimmed = question.trim();
-      if (!trimmed || !datasetId || isAsking) return;
+      if (!trimmed || !datasetId || askingRef.current) return;
 
       const startedAt = Date.now();
+      askingRef.current = true;
 
-      setMessages((current) => [
-        ...current,
-        {
-          id: generateId('user'),
-          role: 'user',
-          content: trimmed,
-          createdAt: new Date().toISOString(),
-          status: 'complete',
-        },
-      ]);
+      setMessages((current) => {
+        const withoutRetriedError = options.replaceMessageId
+          ? current.filter((message) => message.id !== options.replaceMessageId)
+          : current;
+
+        if (options.replaceMessageId) return withoutRetriedError;
+
+        return [
+          ...withoutRetriedError,
+          {
+            id: generateId('user'),
+            role: 'user',
+            content: trimmed,
+            createdAt: new Date().toISOString(),
+            status: 'complete',
+          },
+        ];
+      });
       setIsAsking(true);
 
       try {
@@ -92,10 +107,11 @@ export function useQueryDataset(datasetId: string | undefined): UseQueryDatasetR
           },
         ]);
       } finally {
+        askingRef.current = false;
         if (mounted.current) setIsAsking(false);
       }
     },
-    [datasetId, isAsking],
+    [datasetId],
   );
 
   return { messages, isAsking, ask, clear };

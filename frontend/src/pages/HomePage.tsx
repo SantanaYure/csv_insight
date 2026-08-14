@@ -16,7 +16,7 @@ import { AppPreview } from '../components/home/AppPreview';
 import { pageGutter } from '../theme';
 
 const STEPS = [
-  { number: '01', title: 'Envie o ZIP', description: 'Um arquivo com os CSVs e o dicionário de dados.' },
+  { number: '01', title: 'Envie seus dados', description: 'Um CSV ou um ZIP com seus arquivos CSV.' },
   { number: '02', title: 'Revise os dados', description: 'Confira tabelas, colunas e tipos identificados.' },
   { number: '03', title: 'Faça perguntas', description: 'Escreva como falaria com um analista.' },
   {
@@ -107,7 +107,7 @@ export function HomePage() {
                 leftIcon={<Upload size={19} strokeWidth={1.8} />}
                 onClick={() => navigate('/upload')}
               >
-                Carregar arquivo ZIP
+                Carregar CSV ou ZIP
               </Button>
               <Button
                 as={ChakraLink}
@@ -123,7 +123,7 @@ export function HomePage() {
             </Flex>
 
             <Text mt="26px" fontSize="13.5px" color="text.muted">
-              Múltiplos CSVs · Dicionário de dados · Histórico de consultas
+              CSVs de qualquer estrutura · Dicionário opcional · Histórico de consultas
             </Text>
           </Box>
 

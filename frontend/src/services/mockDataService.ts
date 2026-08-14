@@ -2,7 +2,7 @@ import type { Dataset } from '../types/dataset';
 import type { ChatMessage } from '../types/message';
 import type { QueryResult } from '../types/query';
 import { generateId } from '../utils/generateId';
-import type { DataService, UploadProgress } from './DataService';
+import type { DataService } from './DataService';
 import { datasetStore } from './datasetStore';
 import { readZipDataset } from './ingestion/readZipDataset';
 import { answerQuestion } from './query/queryEngine';
@@ -26,11 +26,11 @@ function randomDelay(min: number, max: number): number {
  * a aplicação começa vazia.
  */
 export const mockDataService: DataService = {
-  async uploadDataset(
-    file: File,
-    onProgress?: (progress: UploadProgress) => void,
-  ): Promise<Dataset> {
-    const { dataset, rows } = await readZipDataset(file, onProgress);
+  async uploadDataset(file, options): Promise<Dataset> {
+    if (options?.signal?.aborted) throw new DOMException('Upload cancelado.', 'AbortError');
+    options?.onUploadProgress?.(100);
+    const { dataset, rows } = await readZipDataset(file, options?.onProcessingProgress);
+    if (options?.signal?.aborted) throw new DOMException('Upload cancelado.', 'AbortError');
     datasetStore.save(dataset, rows);
     return dataset;
   },
@@ -41,7 +41,7 @@ export const mockDataService: DataService = {
     const dataset = datasetStore.getDataset(datasetId);
     if (!dataset) {
       throw new Error(
-        'Nenhum conjunto de dados carregado nesta sessão. Envie um arquivo ZIP para começar.',
+        'Nenhum conjunto de dados carregado nesta sessão. Envie um CSV ou ZIP para começar.',
       );
     }
     return dataset;

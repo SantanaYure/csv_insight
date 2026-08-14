@@ -1,5 +1,7 @@
 import { Fragment, type ReactNode } from 'react';
 
+import { humanizeText } from './humanizeText';
+
 const SPLIT_PATTERN = /(R\$\s?[\d.]+(?:,\d{2})?|\d[\d.]*(?:,\d+)?%?)/g;
 /** Cópia sem a flag `g` para testar cada trecho sem estado compartilhado. */
 const TEST_PATTERN = /^(R\$\s?[\d.]+(?:,\d{2})?|\d[\d.]*(?:,\d+)?%?)$/;
@@ -9,7 +11,7 @@ const TEST_PATTERN = /^(R\$\s?[\d.]+(?:,\d{2})?|\d[\d.]*(?:,\d+)?%?)$/;
  * `<strong>` usado nas respostas do design.
  */
 export function highlightNumbers(text: string): ReactNode {
-  const parts = text.split(SPLIT_PATTERN);
+  const parts = humanizeText(text).split(SPLIT_PATTERN);
 
   return parts.map((part, index) =>
     TEST_PATTERN.test(part) ? (
