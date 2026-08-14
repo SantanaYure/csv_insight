@@ -4,8 +4,8 @@ Canônico (usado por `apiDataService.ts`): `POST /api/datasets/{id}/questions`.
 `POST /api/analyze` é um alias genérico (dataset_id no corpo) pedido
 explicitamente na especificação do backend; internamente chama a mesma
 lógica. Ambos delegam a análise em si para `AgentService` — esta rota só
-conhece a interface pública (`analyze_service.analyze`), nunca a
-implementação mock.
+depende da interface pública através do singleton `agent_service`, e não
+sabe (nem precisa saber) qual implementação concreta está por trás dele.
 """
 
 from __future__ import annotations
