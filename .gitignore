@@ -22,6 +22,9 @@ backend/**/__pycache__
 # Subagent-driven-development scratch workspace (ledger, briefs, review packages)
 .superpowers/
 
+# Local Claude worktrees (temporary repository copies)
+.claude/worktrees/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

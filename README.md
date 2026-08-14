@@ -1,335 +1,292 @@
 # CSV Insight
 
-O projeto está separado em duas aplicações: [`frontend/`](frontend/) contém o
-Vite/React e [`backend/`](backend/) contém a API FastAPI.
+O CSV Insight permite enviar arquivos CSV, ou um arquivo ZIP com vários CSVs, e fazer perguntas sobre os dados em linguagem comum. Por exemplo: **"Qual foi o total de vendas?"**.
 
-Aplicação frontend que permite carregar um pacote ZIP com arquivos CSV e consultar esses dados
-em linguagem natural — sem escrever SQL. A interface implementa o design criado no Claude Design
-("CSV Insight"), preservando tokens, espaçamentos, componentes, estados e comportamento
-responsivo.
+O projeto tem duas partes:
 
-Por padrão (`VITE_USE_MOCKS=false`) o front-end usa o backend FastAPI. O processamento local no
-navegador continua disponível com `VITE_USE_MOCKS=true`. O contrato HTTP é consumido por
-[`frontend/src/services/apiDataService.ts`](frontend/src/services/apiDataService.ts); veja também
-[`backend/README.md`](backend/README.md).
+- `frontend/`: a tela que abre no navegador, feita com React e Vite;
+- `backend/`: a API que processa os arquivos e consulta a inteligência artificial, feita com Python e FastAPI.
 
----
+## 1. O que precisa estar instalado
 
-## Stack
+Antes de começar, instale:
 
-| Camada | Tecnologia |
-| --- | --- |
-| Build | Vite 8 |
-| UI | React 18 + TypeScript (strict) |
-| Design system | Chakra UI 2 (`extendTheme`, tokens semânticos, dark mode) |
-| Rotas | React Router 6 |
-| Formulários | React Hook Form + Zod |
-| Gráficos | Recharts |
-| Leitura do ZIP | fflate |
-| Leitura dos CSVs | papaparse |
-| Ícones | lucide-react |
+- [Node.js](https://nodejs.org/) `20.19` ou mais recente;
+- [Python](https://www.python.org/downloads/) `3.10` ou mais recente;
+- [Git](https://git-scm.com/downloads), caso queira clonar o projeto;
+- uma chave da [API Groq](https://console.groq.com/keys), necessária para fazer perguntas usando o backend.
 
-Não são usados Tailwind, Material UI, Styled Components nem qualquer CSS framework externo:
-todo o estilo vem do tema do Chakra.
+O `npm` já é instalado junto com o Node.js.
 
----
+Para conferir se está tudo instalado, abra um terminal e execute:
 
-## Instalação
+```bash
+node --version
+npm --version
+python --version
+git --version
+```
+
+Se algum comando não for reconhecido, instale o programa correspondente e abra o terminal novamente.
+
+## 2. Baixar o projeto
+
+### Opção A — clonar com Git
+
+No terminal, execute:
+
+```bash
+git clone https://github.com/SantanaYure/csv_insight.git
+cd csv_insight
+```
+
+### Opção B — baixar como ZIP
+
+1. Acesse o [repositório no GitHub](https://github.com/SantanaYure/csv_insight).
+2. Clique em **Code** e depois em **Download ZIP**.
+3. Extraia o arquivo ZIP.
+4. Abra um terminal dentro da pasta extraída.
+
+Todos os comandos abaixo partem da pasta principal do projeto, onde este `README.md` está localizado.
+
+## 3. Instalar o frontend
+
+Entre na pasta do frontend e instale as dependências:
 
 ```bash
 cd frontend
 npm install
+cd ..
 ```
 
-## Execução
+## 4. Instalar o backend
+
+Primeiro, entre na pasta do backend e crie um ambiente virtual. Isso mantém as dependências Python deste projeto separadas das demais.
 
 ```bash
+cd backend
+python -m venv .venv
+```
+
+Ative o ambiente virtual.
+
+No Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+No Prompt de Comando do Windows:
+
+```bat
+.venv\Scripts\activate.bat
+```
+
+No macOS ou Linux:
+
+```bash
+source .venv/bin/activate
+```
+
+Depois, instale as dependências:
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+cd ..
+```
+
+Quando o ambiente estiver ativo, normalmente aparecerá `(.venv)` no início da linha do terminal.
+
+## 5. Configurar as variáveis de ambiente
+
+O frontend e o backend possuem configurações separadas. Por isso, cada pasta precisa do seu próprio arquivo `.env`.
+
+### Frontend
+
+Crie `frontend/.env` a partir do arquivo de exemplo.
+
+No Windows PowerShell:
+
+```powershell
+Copy-Item frontend/.env.example frontend/.env
+```
+
+No macOS ou Linux:
+
+```bash
+cp frontend/.env.example frontend/.env
+```
+
+O arquivo deve ficar assim:
+
+```env
+VITE_USE_MOCKS=false
+VITE_API_URL=http://localhost:8000/api
+```
+
+| Variável | Para que serve |
+| --- | --- |
+| `VITE_USE_MOCKS` | Com `false`, o frontend usa o backend. Com `true`, processa os arquivos localmente no navegador. |
+| `VITE_API_URL` | Endereço da API usada pelo frontend. Para execução local, mantenha `http://localhost:8000/api`. |
+
+### Backend
+
+Crie `backend/.env` a partir do arquivo de exemplo.
+
+No Windows PowerShell:
+
+```powershell
+Copy-Item backend/.env.example backend/.env
+```
+
+No macOS ou Linux:
+
+```bash
+cp backend/.env.example backend/.env
+```
+
+Abra `backend/.env` e informe sua chave da Groq:
+
+```env
+GROQ_API_KEY=coloque_sua_chave_aqui
+GROQ_MODEL=openai/gpt-oss-20b
+CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+CORS_ORIGIN_REGEX=^https?://(localhost|127\.0\.0\.1)(:\d+)?$
+```
+
+| Variável | Para que serve |
+| --- | --- |
+| `GROQ_API_KEY` | Chave de acesso à API Groq. É obrigatória para responder perguntas com inteligência artificial. |
+| `GROQ_MODEL` | Modelo usado pela Groq. O valor padrão já está pronto para uso. |
+| `CORS_ORIGINS` | Endereços do frontend autorizados a acessar o backend. |
+| `CORS_ORIGIN_REGEX` | Permite que o Vite use outra porta local caso a porta `5173` esteja ocupada. |
+
+Não compartilhe sua `GROQ_API_KEY` e não envie os arquivos `.env` para o GitHub.
+
+## 6. Rodar o projeto
+
+É necessário deixar dois terminais abertos: um para o backend e outro para o frontend.
+
+### Terminal 1 — backend
+
+Entre na pasta `backend`, ative o ambiente virtual e inicie a API.
+
+Windows PowerShell:
+
+```powershell
+cd backend
+.\.venv\Scripts\Activate.ps1
+python -m uvicorn main:app --reload
+```
+
+macOS ou Linux:
+
+```bash
+cd backend
+source .venv/bin/activate
+python -m uvicorn main:app --reload
+```
+
+O backend ficará disponível em:
+
+- API: [http://localhost:8000](http://localhost:8000)
+- verificação de funcionamento: [http://localhost:8000/health](http://localhost:8000/health)
+- documentação da API: [http://localhost:8000/docs](http://localhost:8000/docs)
+
+### Terminal 2 — frontend
+
+Em outro terminal, partindo da pasta principal do projeto, execute:
+
+```bash
+cd frontend
 npm run dev
 ```
 
-A aplicação sobe em `http://localhost:5173` (ou na próxima porta livre).
+Abra no navegador o endereço exibido no terminal. Normalmente será:
 
-Outros scripts:
+[http://localhost:5173](http://localhost:5173)
+
+Para encerrar o frontend ou o backend, volte ao terminal correspondente e pressione `Ctrl + C`.
+
+## 7. Rodar somente o frontend, sem backend ou chave da Groq
+
+Se quiser apenas testar a interface e o processamento local:
+
+1. Abra `frontend/.env`.
+2. Altere `VITE_USE_MOCKS=false` para `VITE_USE_MOCKS=true`.
+3. Execute `npm run dev` dentro de `frontend/`.
+
+Nesse modo, não é necessário iniciar o backend. Os dados são processados no navegador e ficam disponíveis apenas durante a sessão.
+
+## 8. Como usar
+
+1. Abra o frontend no navegador.
+2. Acesse a tela de upload.
+3. Envie um arquivo `.csv` ou `.zip` contendo um ou mais arquivos CSV.
+4. Aguarde o processamento.
+5. Faça perguntas sobre os dados carregados.
+
+O dicionário de dados é opcional. Se ele não for enviado, o sistema tenta identificar os tipos das colunas automaticamente.
+
+Os datasets do backend ficam armazenados em memória. Ao reiniciar o backend, será necessário enviar os arquivos novamente.
+
+## 9. Verificar se tudo está correto
+
+Frontend:
 
 ```bash
+cd frontend
+npm run lint
 npm run build
 ```
 
-```bash
-npm run lint
-```
+Backend, com o ambiente virtual ativo:
 
 ```bash
-npm run preview
+cd backend
+python -m pytest -v
 ```
 
----
+## Problemas comuns
 
-## Formato dos arquivos enviados
+### `python` não foi encontrado
 
-A aplicação **começa vazia**: não há nenhum conjunto de dados pré-cadastrado. Tudo que aparece
-no resumo, na consulta e no histórico vem do CSV ou ZIP que você envia em `/upload`.
+No Windows, tente usar `py` no lugar de `python`. Exemplo:
 
-Você pode enviar um CSV diretamente ou um ZIP com um ou mais CSVs. O dicionário
-de dados é opcional e o sistema aceita qualquer estrutura de colunas.
-
-```
-dados.zip
-├─ notas_fiscais.csv
-├─ itens.csv
-├─ fornecedores.csv
-└─ dicionario_dados.csv   (opcional)
+```powershell
+py -m venv .venv
 ```
 
-Regras de leitura:
+### O PowerShell bloqueou a ativação do ambiente virtual
 
-- todo `.csv` do pacote vira uma tabela consultável (diretórios, `__MACOSX/` e arquivos ocultos
-  são ignorados; arquivos que não sejam CSV, como um `README.txt`, também);
-- o dicionário é reconhecido pelo nome (`dicionario…` ou `dictionary…`) e define **tipo** e
-  **descrição** de cada coluna;
-- sem dicionário, os tipos são inferidos dos próprios valores;
-- números aceitam `1234.56`, `1.234,56` e `1234,56`; sequências longas de dígitos
-  (chave de acesso, CNPJ sem máscara) permanecem como texto, sem perda de precisão.
+Execute o comando abaixo no mesmo terminal e tente ativar novamente:
 
-### Dicionário de dados
-
-Cabeçalho esperado — os nomes com acento ou em inglês também são aceitos:
-
-```csv
-arquivo,coluna,tipo,descricao,chave,referencia,formato
-notas_fiscais.csv,valor_total,decimal,Valor total da nota fiscal,,,BRL
-notas_fiscais.csv,id_fornecedor,string,Identificador do fornecedor,FK,fornecedores.id_fornecedor,
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 ```
 
-Mapeamento de tipos: `formato=BRL` → moeda · `datetime|date` → data ·
-`integer|decimal|float` → número · `boolean` → booleano · `string|text` → texto.
+Essa alteração vale somente para o terminal atual.
 
----
+### O frontend abre, mas não consegue acessar a API
 
-## Consultas
+Confirme se:
 
-As respostas são **calculadas sobre as linhas carregadas** — não existe nenhum resultado fixo no
-código. O motor identifica o papel de cada tabela (notas, itens, fornecedores) pelos nomes e
-tipos das colunas e responde a perguntas como:
+- o backend está rodando em `http://localhost:8000`;
+- `VITE_USE_MOCKS` está como `false`;
+- `VITE_API_URL` está como `http://localhost:8000/api`;
+- o frontend foi reiniciado depois de qualquer alteração no arquivo `.env`.
 
-| Pergunta | Tipo de resposta |
-| --- | --- |
-| Qual foi o valor total das compras? | `text` |
-| Quais foram os maiores fornecedores? | `table` (resolve o FK para a razão social) |
-| Qual foi o total gasto em cada mês? | `chart` (barras; linhas acima de 6 meses) |
-| Qual produto teve a maior quantidade comprada? | `combined` |
-| Quais produtos tiveram o maior valor gasto? | `table` |
-| Como foi distribuído o valor por forma de pagamento? | `chart` (pizza) |
-| Quanto foi pago em tributos aproximados? | `text` |
-| Qual foi o ticket médio por nota? | `text` |
-| Qual o item mais caro? | `table` |
-| Quantas notas / quantos itens existem? | `text` |
+### A pergunta retorna erro de configuração
 
-As perguntas sugeridas na sidebar e no estado vazio são geradas a partir das colunas que o
-conjunto realmente possui. Perguntas fora do alcance do motor recebem uma resposta do tipo
-`error` listando os assuntos e as tabelas disponíveis.
+Confira se `GROQ_API_KEY` foi preenchida em `backend/.env` e reinicie o backend.
 
----
+### Uma porta já está em uso
 
-## Serviço de dados
-
-O seletor fica em [`frontend/src/services/index.ts`](frontend/src/services/index.ts):
-
-```ts
-export const dataService: DataService =
-  import.meta.env.VITE_USE_MOCKS === 'true' ? mockDataService : apiDataService;
-```
-
-Com `VITE_USE_MOCKS=true` tudo roda no navegador: o CSV é lido diretamente ou o ZIP é descompactado com `fflate`,
-os CSVs são interpretados com `papaparse` e as consultas são calculadas localmente. O conjunto
-fica no `sessionStorage` (limite de 4 MB; acima disso permanece só em memória), de modo que um
-recarregamento da página não perde os dados da sessão.
-
-**Nenhum componente chama `fetch` diretamente.** Todo acesso a dados passa pela interface
-`DataService`.
-
----
-
-## Variáveis de ambiente
-
-Na pasta `frontend/`, copie `.env.example` para `.env`:
+Encerre o programa que usa a porta ou inicie o serviço em outra porta. Exemplo para o backend:
 
 ```bash
-cp .env.example .env
+python -m uvicorn main:app --reload --port 8001
 ```
 
-| Variável | Padrão | Descrição |
-| --- | --- | --- |
-| `VITE_USE_MOCKS` | `false` | `true` usa o processamento local; qualquer outro valor usa o backend real. |
-| `VITE_API_URL` | `http://localhost:8000/api` | URL base da API. |
-
----
-
-## Estrutura
-
-```
-frontend/src/
-├── app/            App, router e providers
-├── pages/          Uma página por rota + a tela de processamento
-├── layouts/        PublicLayout e ApplicationLayout
-├── components/
-│   ├── common/     Header, sidebar, drawer, badges, cards, diálogos
-│   ├── home/       Mockup da aplicação exibido no hero
-│   ├── upload/     Dropzone, card de arquivo, progresso, etapas
-│   ├── dataset/    Estatísticas, acordeão de tabelas, colunas, preview
-│   ├── query/      Chat, mensagens, input, sugestões, loading
-│   ├── results/    Text, Table, Chart, Combined, Error + utilidades
-│   └── workspace/  Abas + painéis Consulta / Dados / Histórico
-├── services/
-│   ├── ingestion/  Leitura do ZIP, parse de CSV, dicionário e tipos
-│   ├── query/      Papéis das tabelas e motor de respostas
-│   ├── datasetStore.ts     Conjunto e histórico da sessão
-│   ├── DataService.ts      Contrato
-│   ├── mockDataService.ts  Implementação local (no navegador)
-│   └── apiDataService.ts   Implementação HTTP
-├── types/          dataset, query, message, api
-├── hooks/          useDataset, useUploadDataset, useQueryDataset, useHistory
-├── theme/          colors, semanticTokens, typography, components
-└── utils/          formatação de moeda, número, data, tamanho e ids
-```
-
----
-
-## Rotas
-
-O fluxo é enxuto de propósito: duas telas depois da home, espelhando as duas
-interfaces do desafio — **A** (carga) e **B** (consulta).
-
-| Rota | Página | Layout |
-| --- | --- | --- |
-| `/` | `HomePage` | `PublicLayout` |
-| `/upload` | `UploadPage` — Interface A: carga do ZIP + processamento | `PublicLayout` |
-| `/datasets/:datasetId` | `WorkspacePage` — Interface B: dataset carregado | `ApplicationLayout` |
-| `/not-found` | `NotFoundPage` | `PublicLayout` |
-| `*` | redireciona para `/not-found` | — |
-
-`WorkspacePage` não tem sub-rotas: **Consulta**, **Dados** e **Histórico** são
-painéis alternados pelo controle segmentado no topo do conteúdo, guardados em
-`?panel=chat|data|history` (mais `&table=` para expandir uma tabela específica
-e `&q=` para preencher uma pergunta vinda da sidebar). Isso mantém tudo
-deep-linkável sem multiplicar telas — trocar de painel não perde a posição de
-rolagem nem dispara uma navegação de página inteira. `/datasets/:id/query` e
-`/datasets/:id/history` continuam funcionando como redirecionamentos, para
-não quebrar links antigos.
-
-No mobile, o controle segmentado ocupa a largura toda (alvos de toque de
-44px) e a sidebar vira um drawer acionado pelo menu no header; no desktop a
-sidebar fica fixa ao lado do conteúdo e as abas ficam grudadas (`sticky`)
-logo abaixo do header ao rolar a página.
-
-O `datasetId` é gerado no momento do upload. Ao final do processamento a aplicação navega para
-`/datasets/{id}`. Acessar uma rota de dataset sem nenhum conjunto carregado redireciona para
-`/upload` com um aviso — nunca há dados sem envio prévio.
-
----
-
-## Design system
-
-### Cores
-
-Distribuição 60% branco e cinza-claro · 30% preto e cinza-escuro · 10% amarelo. O amarelo fica
-reservado a botões primários, estados ativos, badges, foco, gráficos e indicadores — nunca como
-grande área de fundo.
-
-| Token | Claro | Escuro |
-| --- | --- | --- |
-| `background.page` | `#FAFAFA` | `#111111` |
-| `background.surface` | `#FFFFFF` | `#1F1F1F` |
-| `background.subtle` | `#F5F5F5` | `#2A2A2A` |
-| `text.primary` | `#111111` | `#FFFFFF` |
-| `text.secondary` | `#444444` | `#D4D4D4` |
-| `text.muted` | `#7A7A7A` | `#A3A3A3` |
-| `border.default` | `#E5E5E5` | `#2D2D2D` |
-| `border.strong` | `#D9D9D9` | `#3A3A3A` |
-| `brand.primary` | `#FFCA28` | `#FFCA28` |
-| `brand.primaryHover` | `#F5B800` | `#FFD84D` |
-| `brand.primaryActive` | `#D99D00` | `#F5B800` |
-| `brand.soft` | `#FFF3BF` | `#3A3115` |
-| `brand.tint` | `#FFFBEA` | `#221E13` |
-| `brand.textOnPrimary` | `#111111` | `#111111` |
-
-Também existem `chat.userBg` / `chat.userText`, `chart.grid` / `chart.axis` e a família
-`feedback.success | warning | error | info`.
-
-### Tipografia
-
-Inter, com fallback `system-ui, sans-serif`, pesos 400/500/600/700. A escala vive em
-`theme/typography.ts` e é exposta como `sizes` do `Heading`:
-
-| Token | Desktop | Tablet | Mobile | Peso |
-| --- | --- | --- | --- | --- |
-| `display` | 48px | 36px | 32px | 700 |
-| `h1` | 36px | 30px | 28px | 700 |
-| `h2` | 28px | 24px | 22px | 700 |
-| `subtitle` | 20px | 20px | 18px | 600 |
-| Texto | 16px | 16px | 16px | 400 |
-| Texto pequeno | 14px | 14px | 14px | 400/500 |
-| Legenda | 12px | 12px | 12px | 500 |
-
-### Forma e espaçamento
-
-- Cards 14px · botões e inputs 10px · badges 999px.
-- Sombra de card em uma camada: `0 1px 2px rgba(17,17,17,.05)`; no escuro a elevação vem da cor
-  do card.
-- Escala de 4px. Padding interno de cards 20–28px, gap entre cards 16px, entre seções 52–64px.
-- Gutter da página: 18px no mobile, 28px no tablet, 40px no desktop.
-
-### Breakpoints
-
-`base` < 480px · `sm` 480px · `md` 768px · `lg` 1024px (sidebar fixa) · `xl` 1280px.
-
-### Acessibilidade
-
-- Nenhum controle abaixo de 44×44px.
-- Anel de foco de 2px em amarelo com offset de 2px.
-- Enter envia a pergunta; Shift+Enter quebra a linha; Esc fecha drawer e modal.
-- Texto sobre amarelo sempre em `#111111`; erros nunca só por cor (sempre ícone + texto).
-- Um único `h1` por tela, ícones com `aria-label` e tooltip, estados de carregamento com
-  `role="status"`.
-
-### Tema claro e escuro
-
-`ThemeToggle` usa `useColorMode` do Chakra e a preferência fica em `localStorage`.
-
----
-
-## Integração com o backend FastAPI
-
-1. Suba o backend (veja [`backend/README.md`](backend/README.md) para detalhes):
-
-   ```bash
-   cd backend
-   pip install -r requirements.txt
-   uvicorn main:app --reload
-   ```
-
-2. Ajuste o `.env` do front-end:
-
-   ```
-   VITE_USE_MOCKS=false
-   VITE_API_URL=http://localhost:8000/api
-   ```
-
-3. Endpoints implementados em `backend/routes/`, consumidos por
-   [`frontend/src/services/apiDataService.ts`](frontend/src/services/apiDataService.ts):
-
-   | Método | Endpoint | Corpo | Resposta |
-   | --- | --- | --- | --- |
-   | `POST` | `/datasets` | `multipart/form-data` com o campo `file` | `{ "data": Dataset }` |
-   | `GET` | `/datasets/{datasetId}` | — | `{ "data": Dataset }` |
-   | `POST` | `/datasets/{datasetId}/questions` | `{ "question": string }` | `{ "data": QueryResult }` |
-   | `GET` | `/datasets/{datasetId}/history` | — | `{ "data": ChatMessage[] }` |
-   | `DELETE` | `/datasets/{datasetId}/history/{messageId}` | — | `204` |
-
-4. Os contratos de `Dataset`, `QueryResult` e `ChatMessage` estão em [`frontend/src/types`](frontend/src/types) e
-   têm um schema Pydantic equivalente em [`backend/schemas/models.py`](backend/schemas/models.py).
-   Erros devolvidos com `detail` ou `message` são convertidos em `ApiError` e exibidos como
-   resultado do tipo `error` na conversa.
-
-Como todo acesso passa pela interface `DataService`, trocar mock por API real não exige nenhuma
-alteração em páginas ou componentes.
+Se mudar a porta do backend, atualize também `VITE_API_URL` em `frontend/.env` para o mesmo número, por exemplo `http://localhost:8001/api`, e reinicie o frontend.
