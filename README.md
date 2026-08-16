@@ -1,5 +1,7 @@
 # CSV Insight
 
+LINK PARA A PÁGINA EM PRODUÇÃO: https://csv-insight-indol.vercel.app/
+
 O CSV Insight permite enviar arquivos CSV, ou um arquivo ZIP com vários CSVs, e fazer perguntas sobre os dados em linguagem comum. Por exemplo: **"Qual foi o total de vendas?"**.
 
 O projeto tem duas partes:
